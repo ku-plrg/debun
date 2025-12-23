@@ -1,0 +1,24 @@
+{
+  "name": "debun",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "bin": {
+    "debun": "dist/index.ts"
+  },
+  "dependencies": {
+    "axios": "^1.13.2",
+    "escodegen": "^2.1.0",
+    "meriyah": "6.0.6",
+    "papaparse": "5.5.3",
+    "puppeteer": "^22.0.0",
+    "rapidhash-js": "1.0.4",
+    "semver": "7.7.2"
+  },
+  "devDependencies": {
+    "@types/escodegen": "0.0.10",
+    "@types/papaparse": "5.3.16",
+    "@types/semver": "7.7.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.0.0"
+  }
+}
