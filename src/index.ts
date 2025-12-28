@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import { POGHash } from "./types/pog";
 import { downloadScripts } from "./crawler/crawler";
 import fingerprintCollector from "./fingerprint-collector";
@@ -40,4 +42,16 @@ export async function detectLibrary(url: string) {
       `${score.libName === "react-dom" ? "react" : score.libName}@${version}`
     );
   }
+}
+
+if (require.main === module) {
+  const [, , url] = process.argv;
+  if (!url) {
+    console.error("Usage: ts-node src/index.ts <url>");
+    process.exit(1);
+  }
+  detectLibrary(url).catch((error) => {
+    console.error("Failed to detect libraries:", error);
+    process.exit(1);
+  });
 }

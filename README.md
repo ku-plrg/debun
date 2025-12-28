@@ -3,4 +3,24 @@
 
 ## Overview
 
-Modern web applications extensively use JavaScript bundlers that transform and bundle multiple files, making traditional library detection methods ineffective. DEBUN introduces Property-Order Graphs (POGs) to capture the execution order of property operations within function bodies, which remains preserved despite bundling transformations.
+DEBUN is a CLI tool that detects **third-party JavaScript libraries embedded inside bundled web applications**.  
+Even after transformations performed by bundlers such as Webpack, Rollup, or Parcel, DEBUN leverages **Property-Order Graphs (POGs)** to capture execution characteristics that remain stable, enabling accurate identification of libraries inside minified and concatenated code.
+
+## Installation
+
+Using npm:
+```bash
+$ npm i -g debun-cli
+```
+
+## Usage
+
+**Detect libraries from a web page**
+```bash
+$ debun "<url>"
+```
+
+Example:
+```bash
+$ debun "https://google.com"
+```

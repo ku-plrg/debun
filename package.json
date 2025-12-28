@@ -1,10 +1,16 @@
 {
-  "name": "debun",
+  "name": "debun-cli",
   "version": "1.0.0",
   "main": "index.ts",
+  "description": "DEBUN: Detecting Bundled JavaScript Libraries on Web using Property-Order Graphs",
   "bin": {
-    "debun": "dist/index.ts"
+    "debun": "dist/index.js"
   },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "type": "commonjs",
   "dependencies": {
     "axios": "^1.13.2",
     "escodegen": "^2.1.0",
@@ -20,5 +26,11 @@
     "@types/semver": "7.7.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.0.0"
-  }
+  },
+  "files": [
+    "dist",
+    "src",
+    "dist/data/debun-hashes",
+    "README.md"
+  ]
 }

@@ -37,7 +37,7 @@ export const evaluate = (
     { id: number; versions: string[]; hashCnt: number[] }
   > = JSON.parse(
     fs.readFileSync(
-      path.join(__dirname, `../../data/debun-hashes/all-libs${method}.json`),
+      path.join(__dirname, `./data/debun-hashes/all-libs${method}.json`),
       "utf-8"
     )
   );
@@ -47,7 +47,7 @@ export const evaluate = (
     Record<string, Record<string, [number, number][]>>
   > = JSON.parse(
     fs.readFileSync(
-      path.join(__dirname, `../../data/debun-hashes/all-hash${method}.json`),
+      path.join(__dirname, `./data/debun-hashes/all-hash${method}.json`),
       "utf-8"
     )
   );
@@ -59,7 +59,7 @@ export const evaluate = (
     fs.readFileSync(
       path.join(
         __dirname,
-        `../../data/debun-hashes/blacklist-${WEB_BLACKLIST_THRESHOLD}${method}.json`
+        `./data/debun-hashes/blacklist-${WEB_BLACKLIST_THRESHOLD}${method}.json`
       ),
       "utf-8"
     )
@@ -72,7 +72,7 @@ export const evaluate = (
     fs.readFileSync(
       path.join(
         __dirname,
-        `../../data/debun-hashes/dups-${DUP_THRESHOLD}-hash${method}.json`
+        `./data/debun-hashes/dups-${DUP_THRESHOLD}-hash${method}.json`
       ),
       "utf-8"
     )
@@ -85,7 +85,7 @@ export const evaluate = (
     fs.readFileSync(
       path.join(
         __dirname,
-        `../../data/debun-hashes/dups-${DUP_THRESHOLD}-libs${method}.json`
+        `./data/debun-hashes/dups-${DUP_THRESHOLD}-libs${method}.json`
       ),
       "utf-8"
     )
