@@ -9,26 +9,50 @@ const crawler_1 = require("./crawler/crawler");
 const fingerprint_collector_1 = __importDefault(require("./fingerprint-collector"));
 const lib_scorer_1 = require("./lib-scorer");
 const fs_1 = __importDefault(require("fs"));
-async function detectLibrary(url) {
-    console.log(`Detecting libraries from: ${url}`);
-    const hashes = [];
-    const filePaths = await (0, crawler_1.downloadScripts)(url);
-    for (const filePath of filePaths) {
-        try {
-            let raw;
-            try {
-                raw = fs_1.default.readFileSync(filePath, "utf-8");
-            }
-            catch (e) {
-                continue;
-            }
-            const fingerprints = (0, fingerprint_collector_1.default)(raw);
-            for (const hash of fingerprints) {
-                hashes.push(hash);
-            }
+const path_1 = __importDefault(require("path"));
+function getAllFiles(dirPath, basePath = dirPath) {
+    if (!fs_1.default.existsSync(dirPath)) {
+        return [];
+    }
+    const stat = fs_1.default.statSync(dirPath);
+    if (stat.isFile()) {
+        return [basePath === dirPath ? dirPath : path_1.default.relative(basePath, dirPath)];
+    }
+    const entries = fs_1.default.readdirSync(dirPath, { withFileTypes: true });
+    let result = [];
+    for (const entry of entries) {
+        const fullPath = path_1.default.join(dirPath, entry.name);
+        const relativePath = path_1.default.relative(basePath, fullPath);
+        if (entry.isFile()) {
+            result.push(relativePath);
         }
-        catch (error) {
-            console.error(`Error processing file ${filePath}:`, error);
+        else if (entry.isDirectory()) {
+            result = result.concat(getAllFiles(fullPath, basePath));
+        }
+    }
+    return result;
+}
+async function detectLibrary(urlOrpath) {
+    console.log(`Detecting libraries from: ${urlOrpath}`);
+    const hashes = [];
+    let filePaths = [];
+    if (urlOrpath.startsWith('http://') || urlOrpath.startsWith('https://')) {
+        filePaths = await (0, crawler_1.downloadScripts)(urlOrpath);
+    }
+    else {
+        filePaths = getAllFiles(urlOrpath);
+    }
+    for (const filePath of filePaths) {
+        let raw;
+        try {
+            raw = fs_1.default.readFileSync(filePath, 'utf-8');
+        }
+        catch (e) {
+            continue;
+        }
+        const fingerprints = (0, fingerprint_collector_1.default)(raw);
+        for (const hash of fingerprints) {
+            hashes.push(hash);
         }
     }
     const uniqueHashes = Array.from(new Map(hashes.map((hash) => [hash.hash, hash])).values());
@@ -40,23 +64,23 @@ async function detectLibrary(url) {
         h[hash.nodes].push(hash.hash);
     }
     const scores = (0, lib_scorer_1.evaluate)(h, { threshold: 0.2 });
-    console.log("DETECTED LIBRARIES:");
+    console.log('DETECTED LIBRARIES:');
     for (const score of scores) {
-        const type3Version = score.type3Versions.join("@");
-        const type2Version = score.type2Versions.join("@");
-        const topVersion = score.topVersions.join("@");
+        const type3Version = score.type3Versions.join('@');
+        const type2Version = score.type2Versions.join('@');
+        const topVersion = score.topVersions.join('@');
         const version = type3Version || type2Version || topVersion;
-        console.log(`${score.libName === "react-dom" ? "react" : score.libName}@${version}`);
+        console.log(`${score.libName === 'react-dom' ? 'react' : score.libName}@${version}`);
     }
 }
 if (require.main === module) {
     const [, , url] = process.argv;
     if (!url) {
-        console.error("Usage: ts-node src/index.ts <url>");
+        console.error('Usage: ts-node src/index.ts <url>');
         process.exit(1);
     }
     detectLibrary(url).catch((error) => {
-        console.error("Failed to detect libraries:", error);
+        console.error('Failed to detect libraries:', error);
         process.exit(1);
     });
 }

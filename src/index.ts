@@ -5,6 +5,29 @@ import { downloadScripts } from './crawler/crawler';
 import fingerprintCollector from './fingerprint-collector';
 import { evaluate } from './lib-scorer';
 import fs from 'fs';
+import path from 'path';
+
+function getAllFiles(dirPath: string, basePath: string = dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    return [];
+  }
+  const stat = fs.statSync(dirPath);
+  if (stat.isFile()) {
+    return [basePath === dirPath ? dirPath : path.relative(basePath, dirPath)];
+  }
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  let result: string[] = [];
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+    const relativePath = path.relative(basePath, fullPath);
+    if (entry.isFile()) {
+      result.push(relativePath);
+    } else if (entry.isDirectory()) {
+      result = result.concat(getAllFiles(fullPath, basePath));
+    }
+  }
+  return result;
+}
 
 export async function detectLibrary(urlOrpath: string) {
   console.log(`Detecting libraries from: ${urlOrpath}`);
@@ -13,7 +36,7 @@ export async function detectLibrary(urlOrpath: string) {
   if (urlOrpath.startsWith('http://') || urlOrpath.startsWith('https://')) {
     filePaths = await downloadScripts(urlOrpath);
   } else {
-    filePaths = fs.readdirSync(urlOrpath).map((file) => `${urlOrpath}/${file}`);
+    filePaths = getAllFiles(urlOrpath);
   }
   for (const filePath of filePaths) {
     let raw;
