@@ -1,6 +1,6 @@
 {
   "name": "debun-cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "index.ts",
   "description": "DEBUN: Detecting Bundled JavaScript Libraries on Web using Property-Order Graphs",
   "bin": {
@@ -9,6 +9,10 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ku-plrg/debun.git"
   },
   "type": "commonjs",
   "dependencies": {
@@ -30,7 +34,6 @@
   "files": [
     "dist",
     "src",
-    "dist/data/debun-hashes",
     "README.md"
   ]
 }

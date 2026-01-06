@@ -5,7 +5,7 @@
 
 ## Overview
 
-DEBUN is a CLI tool that detects **third-party JavaScript libraries embedded inside bundled web applications**. Even after transformations performed by bundlers such as Webpack, Rollup, or Parcel, DEBUN leverages **Property-Order Graphs (POGs)** to capture characteristics that remain stable, enabling accurate identification of libraries inside minified and concatenated code.
+**debun-cli** is a CLI tool that detects **third-party JavaScript libraries embedded inside bundled web applications**. Even after transformations performed by bundlers such as Webpack, Rollup, or Parcel, **Debun** leverages **Property-Order Graphs (POGs)** to capture characteristics that remain stable, enabling accurate identification of libraries inside minified and concatenated code.
 
 ## Features
 
@@ -21,23 +21,23 @@ $ npm i -g debun-cli
 
 ## Usage
 
-**Detect libraries from Javascript directory or file**
+- **Detect libraries from Javascript directory or file**
 ```bash
 $ debun "<path>"
 ```
 
-Example:
+- Example:
 ```bash
 $ debun src/test
 ```
 
 
-**Detect libraries from a web page**
+- **Detect libraries from a web page**
 ```bash
 $ debun "<url>"
 ```
 
-Example:
+- Example:
 ```bash
 $ debun https://youtube.com
 ```
@@ -45,14 +45,14 @@ $ debun https://youtube.com
 ## Related
 
 - [npm package](https://www.npmjs.com/package/debun-cli)
-- [GitHub repository](https://github.com/yourusername/debun)
+- [GitHub repository](https://github.com/ku-plrg/debun)
 
 ## Research Paper
 
 This tool is based on the research paper:
 
-**"DEBUN: Detecting Bundled JavaScript Libraries on Web using Property-Order Graphs"**
+**"Debun: Detecting Bundled JavaScript Libraries on Web using Property-Order Graphs"**
 
-📄 **Paper**: https://plrg.korea.ac.kr/assets/data/publication/ase25-park-debun.pdf
-👥 **Authors**: Seojin Kim, Sungmin Park, Jihyeok Park
-📅 **Published**: ASE 2025 (IEEE/ACM International Conference on Automated Software Engineering)
+- 📄 **Paper**: https://plrg.korea.ac.kr/assets/data/publication/ase25-park-debun.pdf
+- 👥 **Authors**: Seojin Kim, Sungmin Park, Jihyeok Park
+- 📅 **Published**: ASE 2025 (IEEE/ACM International Conference on Automated Software Engineering)
