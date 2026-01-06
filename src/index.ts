@@ -49,7 +49,11 @@ export async function detectLibrary(urlOrpath: string) {
     h[hash.nodes].push(hash.hash);
   }
   const scores = evaluate(h, { threshold: 0.2 });
-  console.log('DETECTED LIBRARIES:');
+  if (scores.length === 0) {
+    console.log('❌ No libraries detected.');
+    return;
+  }
+  console.log('✅ DETECTED LIBRARIES:');
   for (const score of scores) {
     const type3Version = score.type3Versions.join('@');
     const type2Version = score.type2Versions.join('@');
