@@ -25,6 +25,8 @@ const evaluate = (uniqueHashes, options, method = "", url = "") => {
     let totalMatches = {};
     let type3Matches = {};
     let type2Matches = {};
+    if (!uniqueHashes)
+        return [];
     Object.entries(uniqueHashes).forEach(([nodes, hashes]) => {
         hashes.forEach((hash) => {
             if (!libHashes[nodes]?.[hash])

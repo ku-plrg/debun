@@ -15,7 +15,13 @@ async function detectLibrary(url) {
     const filePaths = await (0, crawler_1.downloadScripts)(url);
     for (const filePath of filePaths) {
         try {
-            const raw = fs_1.default.readFileSync(filePath, "utf-8");
+            let raw;
+            try {
+                raw = fs_1.default.readFileSync(filePath, "utf-8");
+            }
+            catch (e) {
+                continue;
+            }
             const fingerprints = (0, fingerprint_collector_1.default)(raw);
             for (const hash of fingerprints) {
                 hashes.push(hash);

@@ -163,10 +163,16 @@ async function downloadScripts(
   const reachableUrl = new URL(
     targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`
   );
-  await page.goto(reachableUrl.toString(), {
-    waitUntil: 'networkidle2',
-    timeout: 90000,
-  });
+  try {
+    await page.goto(reachableUrl.toString(), {
+      waitUntil: 'networkidle2',
+      timeout: 90000,
+    });
+  } catch (err) {
+    console.error(
+      `Error navigating to ${reachableUrl}: ${(err as any).message}`
+    );
+  }
 
   const preloadScripts = await getPreloadScripts(page);
   preloadScripts.forEach((scriptUrl) => jsFiles.add(scriptUrl));

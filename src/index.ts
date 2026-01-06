@@ -1,24 +1,30 @@
 #!/usr/bin/env node
 
-import { POGHash } from "./types/pog";
-import { downloadScripts } from "./crawler/crawler";
-import fingerprintCollector from "./fingerprint-collector";
-import { evaluate } from "./lib-scorer";
-import fs from "fs";
+import { POGHash } from './types/pog';
+import { downloadScripts } from './crawler/crawler';
+import fingerprintCollector from './fingerprint-collector';
+import { evaluate } from './lib-scorer';
+import fs from 'fs';
 
-export async function detectLibrary(url: string) {
-  console.log(`Detecting libraries from: ${url}`);
+export async function detectLibrary(urlOrpath: string) {
+  console.log(`Detecting libraries from: ${urlOrpath}`);
   const hashes: POGHash[] = [];
-  const filePaths = await downloadScripts(url);
+  let filePaths: string[] = [];
+  if (urlOrpath.startsWith('http://') || urlOrpath.startsWith('https://')) {
+    filePaths = await downloadScripts(urlOrpath);
+  } else {
+    filePaths = fs.readdirSync(urlOrpath).map((file) => `${urlOrpath}/${file}`);
+  }
   for (const filePath of filePaths) {
+    let raw;
     try {
-      const raw = fs.readFileSync(filePath, "utf-8");
-      const fingerprints = fingerprintCollector(raw);
-      for (const hash of fingerprints) {
-        hashes.push(hash);
-      }
-    } catch (error) {
-      console.error(`Error processing file ${filePath}:`, error);
+      raw = fs.readFileSync(filePath, 'utf-8');
+    } catch (e) {
+      continue;
+    }
+    const fingerprints = fingerprintCollector(raw);
+    for (const hash of fingerprints) {
+      hashes.push(hash);
     }
   }
   const uniqueHashes = Array.from(
@@ -32,14 +38,14 @@ export async function detectLibrary(url: string) {
     h[hash.nodes].push(hash.hash);
   }
   const scores = evaluate(h, { threshold: 0.2 });
-  console.log("DETECTED LIBRARIES:");
+  console.log('DETECTED LIBRARIES:');
   for (const score of scores) {
-    const type3Version = score.type3Versions.join("@");
-    const type2Version = score.type2Versions.join("@");
-    const topVersion = score.topVersions.join("@");
+    const type3Version = score.type3Versions.join('@');
+    const type2Version = score.type2Versions.join('@');
+    const topVersion = score.topVersions.join('@');
     const version = type3Version || type2Version || topVersion;
     console.log(
-      `${score.libName === "react-dom" ? "react" : score.libName}@${version}`
+      `${score.libName === 'react-dom' ? 'react' : score.libName}@${version}`
     );
   }
 }
@@ -47,11 +53,11 @@ export async function detectLibrary(url: string) {
 if (require.main === module) {
   const [, , url] = process.argv;
   if (!url) {
-    console.error("Usage: ts-node src/index.ts <url>");
+    console.error('Usage: ts-node src/index.ts <url>');
     process.exit(1);
   }
   detectLibrary(url).catch((error) => {
-    console.error("Failed to detect libraries:", error);
+    console.error('Failed to detect libraries:', error);
     process.exit(1);
   });
 }

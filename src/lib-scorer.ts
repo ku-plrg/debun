@@ -94,6 +94,7 @@ export const evaluate = (
   let totalMatches: Record<string, Record<number, number>> = {};
   let type3Matches: Record<string, Record<number, number>> = {};
   let type2Matches: Record<string, Record<number, number>> = {};
+  if (!uniqueHashes) return [];
 
   Object.entries(uniqueHashes).forEach(([nodes, hashes]) => {
     hashes.forEach((hash) => {
