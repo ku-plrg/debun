@@ -10,28 +10,6 @@ const fingerprint_collector_1 = __importDefault(require("./fingerprint-collector
 const lib_scorer_1 = require("./lib-scorer");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
-function getAllFiles(dirPath, basePath = dirPath) {
-    if (!fs_1.default.existsSync(dirPath)) {
-        return [];
-    }
-    const stat = fs_1.default.statSync(dirPath);
-    if (stat.isFile()) {
-        return [basePath === dirPath ? dirPath : path_1.default.relative(basePath, dirPath)];
-    }
-    const entries = fs_1.default.readdirSync(dirPath, { withFileTypes: true });
-    let result = [];
-    for (const entry of entries) {
-        const fullPath = path_1.default.join(dirPath, entry.name);
-        const relativePath = path_1.default.relative(basePath, fullPath);
-        if (entry.isFile()) {
-            result.push(relativePath);
-        }
-        else if (entry.isDirectory()) {
-            result = result.concat(getAllFiles(fullPath, basePath));
-        }
-    }
-    return result;
-}
 async function detectLibrary(urlOrpath) {
     console.log(`Detecting libraries from: ${urlOrpath}`);
     const hashes = [];
@@ -40,7 +18,20 @@ async function detectLibrary(urlOrpath) {
         filePaths = await (0, crawler_1.downloadScripts)(urlOrpath);
     }
     else {
-        filePaths = getAllFiles(urlOrpath);
+        const collectFilesRecursively = (p) => {
+            const stat = fs_1.default.statSync(p);
+            if (stat.isFile())
+                return [p];
+            return fs_1.default.readdirSync(p, { withFileTypes: true }).flatMap((entry) => {
+                const fullPath = path_1.default.join(p, entry.name);
+                if (entry.isDirectory())
+                    return collectFilesRecursively(fullPath);
+                if (entry.isFile() && fullPath.endsWith('.js'))
+                    return [fullPath];
+                return [];
+            });
+        };
+        filePaths = collectFilesRecursively(urlOrpath);
     }
     for (const filePath of filePaths) {
         let raw;

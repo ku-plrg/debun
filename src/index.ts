@@ -7,28 +7,6 @@ import { evaluate } from './lib-scorer';
 import fs from 'fs';
 import path from 'path';
 
-function getAllFiles(dirPath: string, basePath: string = dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    return [];
-  }
-  const stat = fs.statSync(dirPath);
-  if (stat.isFile()) {
-    return [basePath === dirPath ? dirPath : path.relative(basePath, dirPath)];
-  }
-  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-  let result: string[] = [];
-  for (const entry of entries) {
-    const fullPath = path.join(dirPath, entry.name);
-    const relativePath = path.relative(basePath, fullPath);
-    if (entry.isFile()) {
-      result.push(relativePath);
-    } else if (entry.isDirectory()) {
-      result = result.concat(getAllFiles(fullPath, basePath));
-    }
-  }
-  return result;
-}
-
 export async function detectLibrary(urlOrpath: string) {
   console.log(`Detecting libraries from: ${urlOrpath}`);
   const hashes: POGHash[] = [];
@@ -36,7 +14,17 @@ export async function detectLibrary(urlOrpath: string) {
   if (urlOrpath.startsWith('http://') || urlOrpath.startsWith('https://')) {
     filePaths = await downloadScripts(urlOrpath);
   } else {
-    filePaths = getAllFiles(urlOrpath);
+    const collectFilesRecursively = (p: string): string[] => {
+      const stat = fs.statSync(p);
+      if (stat.isFile()) return [p];
+      return fs.readdirSync(p, { withFileTypes: true }).flatMap((entry) => {
+        const fullPath = path.join(p, entry.name);
+        if (entry.isDirectory()) return collectFilesRecursively(fullPath);
+        if (entry.isFile() && fullPath.endsWith('.js')) return [fullPath];
+        return [];
+      });
+    };
+    filePaths = collectFilesRecursively(urlOrpath);
   }
   for (const filePath of filePaths) {
     let raw;
