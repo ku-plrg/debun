@@ -1,6 +1,6 @@
 {
   "name": "debun-cli",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "main": "index.ts",
   "description": "DEBUN: Detecting Bundled JavaScript Libraries on Web using Property-Order Graphs",
   "bin": {
