@@ -1,11 +1,11 @@
-# debun-cli
+# Debun-cli
 
 > Detecting Bundled JavaScript Libraries on Web using Property-Order Graphs
 
 
 ## Overview
 
-**debun-cli** is a CLI tool that detects **third-party JavaScript libraries embedded inside bundled web applications**. Even after transformations performed by bundlers such as Webpack, Rollup, or Parcel, **Debun** leverages **Property-Order Graphs (POGs)** to capture characteristics that remain stable, enabling accurate identification of libraries inside minified and concatenated code.
+**Debun-cli** is a CLI tool that detects **third-party JavaScript libraries embedded inside bundled web applications**. Even after transformations performed by bundlers such as Webpack, Rollup, or Parcel, **Debun** leverages **Property-Order Graphs (POGs)** to capture characteristics that remain stable, enabling accurate identification of libraries inside minified and concatenated code.
 
 ## Features
 
