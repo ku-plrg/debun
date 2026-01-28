@@ -3,7 +3,7 @@ import { HashData, LibData } from '../types/types';
 export function mergeHashData(
   data1: HashData,
   data2: HashData,
-  lib_data1: number
+  libcnt: number
 ): HashData {
   const merged = { ...data1 };
 
@@ -18,7 +18,7 @@ export function mergeHashData(
       }
 
       for (const libIdx in data2[nodes][hash]) {
-        const key = Number(libIdx) + lib_data1;
+        const key = Number(libIdx) + libcnt;
         if (!merged[nodes][hash][key]) {
           merged[nodes][hash][key] = [];
         }
@@ -34,14 +34,14 @@ export function mergeHashData(
 export function mergeLibData(data1: LibData, data2: LibData) {
   const merged = { ...data1 };
 
-  const libcnt = Math.max(0, ...Object.keys(merged).map(Number));
+  const libcnt = Math.max(0, ...Object.keys(merged).map(Number)) + 1;
 
   for (const libIdx in data2) {
     const key = Number(libIdx) + libcnt;
     merged[key] = data2[libIdx];
   }
 
-  return { mergedLibData: merged, lib_data1: libcnt };
+  return { mergedLibData: merged, libcnt: libcnt };
 }
 
 export function mergeDatabases(
@@ -50,8 +50,8 @@ export function mergeDatabases(
   hashData2: HashData,
   libData2: LibData
 ): { mergedHashData: HashData; mergedLibData: LibData } {
-  const { mergedLibData, lib_data1 } = mergeLibData(libData1, libData2);
-  const mergedHashData = mergeHashData(hashData1, hashData2, lib_data1);
+  const { mergedLibData, libcnt } = mergeLibData(libData1, libData2);
+  const mergedHashData = mergeHashData(hashData1, hashData2, libcnt);
 
   return { mergedHashData, mergedLibData };
 }
