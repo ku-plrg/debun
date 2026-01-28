@@ -39,6 +39,7 @@ Examples:
   debun detect ./src/js
   debun detect -w https://example.com
   debun add lodash
+  debun reset
 `);
 }
 function printVersion() {
