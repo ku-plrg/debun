@@ -1,17 +1,48 @@
 #!/usr/bin/env node
 
-import { Score, POGHash } from './types/types';
+import { Score } from './types/types';
 import { downloadScripts } from './crawler/crawler';
 import fingerprintCollector from './fingerprint-collector';
 import { evaluate } from './lib-scorer';
 import fs from 'fs';
 import path from 'path';
-import { logger } from './utils/logger';
 
-export async function detectLibrary(urlOrpath: string) {
-  logger.info(`Detecting libraries from: ${urlOrpath}`);
+const VERSION = '1.0.2';
+
+function printHelp() {
+  console.log(`
+debun - Detecting Bundled JavaScript Libraries on Web using Property-Order Graphs
+
+Usage:
+  debun detect <path>        Detect libraries from local JavaScript files/directory
+  debun detect -w <url>      Detect libraries from a web page URL
+  debun add <pkg>            Add a new package to the database
+  debun help                 Show this help message
+  debun --version            Show version
+
+Options:
+  -v, --verbose              Enable verbose output
+  -w, --web                  Treat input as a web URL (for detect command)
+
+Examples:
+  debun detect ./src/js
+  debun detect -w https://example.com
+  debun add lodash
+`);
+}
+
+function printVersion() {
+  console.log(`debun v${VERSION}`);
+}
+
+export async function detectLibrary(urlOrpath: string, isWeb: boolean = false) {
   let filePaths: string[] = [];
-  if (urlOrpath.startsWith('http://') || urlOrpath.startsWith('https://')) {
+
+  if (
+    isWeb ||
+    urlOrpath.startsWith('http://') ||
+    urlOrpath.startsWith('https://')
+  ) {
     filePaths = await downloadScripts(urlOrpath);
   } else {
     const collectFilesRecursively = (p: string): string[] => {
@@ -27,7 +58,6 @@ export async function detectLibrary(urlOrpath: string) {
     filePaths = collectFilesRecursively(urlOrpath);
   }
 
-  logger.debug(`Found ${filePaths.length} JavaScript files`);
   const mergeUnique = (target: string[], source: string[]) => {
     for (const item of source) {
       if (!target.includes(item)) target.push(item);
@@ -41,7 +71,6 @@ export async function detectLibrary(urlOrpath: string) {
     try {
       raw = fs.readFileSync(filePath, 'utf-8');
     } catch (e) {
-      logger.warn(`Failed to read file: ${filePath}`);
       continue;
     }
     const fingerprints = fingerprintCollector(raw);
@@ -73,29 +102,98 @@ export async function detectLibrary(urlOrpath: string) {
   }
   const scores = [...merged.values()];
   if (scores.length === 0) {
-    logger.info('No libraries detected.');
+    console.log('No libraries detected.');
     return;
   }
-  logger.info('✅ DETECTED LIBRARIES:');
+  console.log('Detected libraries:');
   for (const score of scores) {
     const type3Version = score.type3Versions.join('@');
     const type2Version = score.type2Versions.join('@');
     const topVersion = score.topVersions.join('@');
     const version = type3Version || type2Version || topVersion;
-    logger.info(
-      `${score.libName === 'react-dom' ? 'react' : score.libName}@${version}`
+    console.log(
+      `  ${score.libName === 'react-dom' ? 'react' : score.libName}@${version}`
     );
   }
 }
 
-if (require.main === module) {
-  const [, , url] = process.argv;
-  if (!url) {
-    logger.error('Usage: ts-node src/index.ts <url>');
+function parseArgs(argv: string[]) {
+  const args: string[] = [];
+  const flags: Record<string, boolean> = {};
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '-v' || arg === '--verbose') {
+      flags.verbose = true;
+    } else if (arg === '-w' || arg === '--web') {
+      flags.web = true;
+    } else if (arg === '--version') {
+      flags.version = true;
+    } else if (arg === '-h' || arg === '--help') {
+      flags.help = true;
+    } else if (!arg.startsWith('-')) {
+      args.push(arg);
+    }
+  }
+
+  return { args, flags };
+}
+
+async function main() {
+  const { args, flags } = parseArgs(process.argv.slice(2));
+
+  if (flags.version) {
+    printVersion();
+    return;
+  }
+
+  if (flags.help || args[0] === 'help') {
+    printHelp();
+    return;
+  }
+
+  const command = args[0];
+
+  if (!command) {
+    printHelp();
     process.exit(1);
   }
-  detectLibrary(url).catch((error) => {
-    logger.error('Failed to detect libraries:', error);
+
+  switch (command) {
+    case 'detect': {
+      const target = args[1];
+      if (!target) {
+        console.log('Usage: debun detect <path> or debun detect -w <url>');
+        process.exit(1);
+      }
+      await detectLibrary(target, flags.web);
+      break;
+    }
+    case 'add': {
+      const packageName = args[1];
+      if (!packageName) {
+        console.log('Usage: debun add <package-name>');
+        process.exit(1);
+      }
+      break;
+    }
+    default: {
+      if (
+        fs.existsSync(command) ||
+        command.startsWith('http://') ||
+        command.startsWith('https://')
+      ) {
+        await detectLibrary(command);
+      } else {
+        printHelp();
+        process.exit(1);
+      }
+    }
+  }
+}
+
+if (require.main === module) {
+  main().catch((error) => {
     process.exit(1);
   });
 }

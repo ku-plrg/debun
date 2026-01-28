@@ -8,14 +8,6 @@ const axios_1 = __importDefault(require("axios"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const puppeteer_1 = __importDefault(require("puppeteer"));
-const logFilePath = path_1.default.join(__dirname, 'error-log.txt');
-function logError(msg) {
-    console.error(msg);
-    fs_1.default.appendFile(logFilePath, msg + '\n', (fsErr) => {
-        if (fsErr)
-            console.error('Failed to write to log file:', fsErr);
-    });
-}
 // To prevent `ENAMETOOLONG`
 const MAX_LENGTH = 230;
 function truncateFileName(fileName) {
@@ -37,31 +29,26 @@ async function downloadFileFallback(url, filePath) {
 }
 async function downloadFileFallback2(url, filePath) {
     try {
-        console.log(`Fallback downloading: ${url}`);
         const response = await (0, axios_1.default)({
             method: 'get',
             url,
-            responseType: 'arraybuffer', // Binary data
+            responseType: 'arraybuffer',
             timeout: 5000,
         });
         if (response.status >= 400) {
             throw new Error(`[${response.status}] ${response.statusText}`);
         }
         fs_1.default.writeFileSync(filePath, response.data);
-        console.log(`Fallback saved: ${filePath}`);
     }
-    catch (err) {
-        console.error(`Fallback download failed: ${err.message}`);
-    }
+    catch (err) { }
 }
 async function downloadFile(url, filePath) {
     return new Promise((resolve) => {
-        console.log(`Downloading: ${url}`);
         (0, axios_1.default)({
             method: 'get',
             url,
             responseType: 'stream',
-            timeout: 5000, // 5 seconds
+            timeout: 5000,
         })
             .then((response) => {
             if (response.status < 400) {
@@ -69,7 +56,6 @@ async function downloadFile(url, filePath) {
                 response.data.pipe(file);
                 file.on('finish', () => {
                     file.close(() => {
-                        console.log(`Saved: ${filePath}`);
                         resolve(true);
                     });
                 });
@@ -85,7 +71,6 @@ async function downloadFile(url, filePath) {
             downloadFileFallback2(url, filePath)
                 .then(() => resolve(true))
                 .catch((err2) => {
-                logError(`Error downloading file "${url}": ${err2.message || err2}`);
                 resolve(false);
             });
         });
@@ -128,7 +113,6 @@ function encodeFileNameOnly(path) {
     return [...parts, fileName].join('/');
 }
 async function downloadScripts(targetUrl, headless = true, rootFolder = 'data/crawled') {
-    console.time(`Download-${targetUrl}`);
     let browser;
     try {
         browser = await puppeteer_1.default.launch({
@@ -153,7 +137,7 @@ async function downloadScripts(targetUrl, headless = true, rootFolder = 'data/cr
         });
     }
     catch (err) {
-        console.error(`Error navigating to ${reachableUrl}: ${err.message}`);
+        `Error navigating to ${reachableUrl}: ${err.message}`;
     }
     const preloadScripts = await getPreloadScripts(page);
     preloadScripts.forEach((scriptUrl) => jsFiles.add(scriptUrl));
@@ -165,9 +149,9 @@ async function downloadScripts(targetUrl, headless = true, rootFolder = 'data/cr
         const filepath = path_1.default.join(domainFolder, `browser-script-${idx}.js`);
         fs_1.default.writeFileSync(filepath, inlineScript, 'utf8');
     });
-    console.log(`Found ${jsFiles.size} JS files. Downloading...`);
     const errorUrls = [];
     const allFilePaths = [];
+    let downloadedCount = 0;
     for (const fileUrl of jsFiles) {
         try {
             const filePath = truncateFileName(encodeFileNameOnly(fileUrl.replace(/https?:\/\//, '')));
@@ -175,17 +159,13 @@ async function downloadScripts(targetUrl, headless = true, rootFolder = 'data/cr
             allFilePaths.push(fullFilePath);
             guardFolderSync(path_1.default.dirname(fullFilePath));
             await downloadFile(fileUrl, fullFilePath);
+            downloadedCount++;
+            if (jsFiles.size > 5) {
+            }
         }
         catch (error) {
-            const errorMessage = `Failed to download: ${fileUrl} - ${error}\n`;
-            logError(errorMessage);
             errorUrls.push(fileUrl);
         }
     }
-    console.log(`All JS files saved to ${domainFolder}`);
-    if (errorUrls.length > 0)
-        console.log(`However, there were errors downloading the following ${errorUrls.length} files:\n
-          -${errorUrls.join('\n-')}`);
-    console.timeEnd(`Download-${targetUrl}`);
     return allFilePaths;
 }

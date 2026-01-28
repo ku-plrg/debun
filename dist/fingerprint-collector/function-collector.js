@@ -1,134 +1,71 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 const meriyah_1 = require("meriyah");
-const walk_1 = __importDefault(require("../utils/walk"));
-const FUNC_ID = true;
-let functions = [];
-function recordFunction(node) {
-    if (!node.body)
-        return;
-    const body = stripFunctions(node.body);
-    if (FUNC_ID) {
-        if (node.type === 'ArrowFunctionExpression' && node.expression)
-            functions.push({
-                id: getId(body),
-                body: {
-                    ...node,
-                    body: body,
-                },
-            });
-        else
-            functions.push({
-                id: getId(body),
-                body: {
-                    ...node,
-                    body: {
-                        type: 'BlockStatement',
-                        body: [body],
-                    },
-                },
-            });
-        return;
-    }
-    functions.push({
-        body,
-    });
-}
-function stripFunctions(node) {
-    if (!node)
-        return node;
-    if (node.type === 'FunctionDeclaration' ||
+const estree_walker_1 = require("estree-walker");
+function isFunctionNode(node) {
+    return (node.type === 'FunctionDeclaration' ||
         node.type === 'FunctionExpression' ||
-        node.type === 'ArrowFunctionExpression') {
-        if (!node.body)
-            return node;
-        recordFunction(node);
-        return node.type === 'FunctionDeclaration'
-            ? { type: 'EmptyStatement' }
-            : {
-                type: node.type,
-                id: null,
-                params: [],
-                generator: false,
-                async: false,
-                body: {
+        node.type === 'ArrowFunctionExpression');
+}
+function recordFunction(node, functions) {
+    const body = stripFunctions(node.body, functions);
+    functions.push({ body });
+}
+function stripFunctions(node, functions) {
+    (0, estree_walker_1.walk)(node, {
+        enter(child) {
+            if (isFunctionNode(child)) {
+                recordFunction(child, functions);
+                const createEmptyBody = () => ({
                     type: 'BlockStatement',
                     body: [],
-                },
-            };
-    }
-    // Process all child nodes
-    Object.entries(node).forEach(([key, value]) => {
-        if (value && typeof value === 'object') {
-            if (Array.isArray(value)) {
-                for (let i = 0; i < value.length; i++) {
-                    if (value[i] && typeof value[i] === 'object') {
-                        value[i] = stripFunctions(value[i]);
+                });
+                const replacement = (() => {
+                    if (child.type === 'FunctionDeclaration' ||
+                        child.type === 'FunctionExpression') {
+                        return {
+                            ...child,
+                            body: createEmptyBody(),
+                        };
                     }
-                }
+                    return {
+                        ...child,
+                        body: child.expression
+                            ? { type: 'Identifier', name: '_' }
+                            : createEmptyBody(),
+                    };
+                })();
+                this.replace(replacement);
+                return;
             }
-            else {
-                node[key] = stripFunctions(value);
-            }
-        }
+        },
     });
     return node;
 }
-// check if JSCA_ id symbol is injected in the function body
-function getId(node) {
-    let value;
-    (0, walk_1.default)(node, {
-        CallExpression(node) {
-            if (node.type === 'CallExpression' &&
-                node.callee.type === 'Identifier' &&
-                node.callee.name === 'Symbol' &&
-                node.arguments.length > 0 &&
-                node.arguments[0].type === 'Literal' &&
-                typeof node.arguments[0].value === 'string') {
-                const symbolValue = node.arguments[0].value;
-                if (value === undefined && symbolValue.startsWith('JSCA_')) {
-                    value = symbolValue;
-                }
-            }
-        },
-        TemplateLiteral(node) {
-            if (node.type !== 'TemplateLiteral')
-                return;
-            const templateValue = node.quasis[0]?.value.raw;
-            if (value === undefined && templateValue.startsWith('JSCA_')) {
-                value = templateValue;
-            }
-        },
-        Literal(node) {
-            if (node.type === 'Literal' &&
-                value === undefined &&
-                typeof node.value === 'string' &&
-                node.value.startsWith('JSCA_')) {
-                value = node.value;
-            }
-        },
-    });
-    return value || '';
-}
 function extractFunctions(code) {
-    functions = [];
+    const functions = [];
     let ast;
-    try {
-        ast = (0, meriyah_1.parse)(code, {
-            next: true,
-            module: false,
-        });
+    const sourceTypes = [
+        'script',
+        'module',
+        'commonjs',
+    ];
+    let lastError;
+    for (const sourceType of sourceTypes) {
+        try {
+            ast = (0, meriyah_1.parse)(code, {
+                next: true,
+                sourceType,
+            });
+            break;
+        }
+        catch (e) {
+            lastError = e;
+        }
     }
-    catch (e) {
-        ast = (0, meriyah_1.parse)(code, {
-            next: true,
-            module: true,
-        });
-    }
-    stripFunctions(ast);
+    if (!ast)
+        throw lastError;
+    stripFunctions(ast, functions);
     return functions;
 }
 exports.default = extractFunctions;

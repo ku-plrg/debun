@@ -33,18 +33,13 @@ function isJS(files: string[]): string[] {
 }
 
 (async () => {
-  const start = Date.now();
   let allLibs: LibData = {};
   let allHashes: HashData = {};
   try {
     let libId = 0;
     const libNames = fs.readdirSync(npmDataDirPath);
-    const totalLibs = libNames.length;
-
     for (const libName of libNames) {
       let hashes: POGHash[] = [];
-      console.log(`[${libId + 1}/${totalLibs}] processing ${libName}`);
-      const libStart = Date.now();
 
       const versions = fs.readdirSync(join(npmDataDirPath, libName));
       const validVersions = versions.filter(
@@ -56,9 +51,6 @@ function isJS(files: string[]): string[] {
       let versionIdx = 0;
       for (const version of sortedVersions) {
         hashes = [];
-        console.log(
-          `[${versionIdx + 1}/${sortedVersions.length}] ${version} processing...`
-        );
         const versionPath = join(npmDataDirPath, libName, version);
         const preferredDirs = ['src', 'lib', 'source', 'dist', 'closure', 'js'];
         const targetDirs = preferredDirs.filter((dir) => {
@@ -79,19 +71,8 @@ function isJS(files: string[]): string[] {
             try {
               const newHashes = fingerprintCollector(code);
               hashes.push(...newHashes);
-            } catch (hashError) {
-              const errorMsg = (hashError as Error).message;
-              console.log('[Hash error]', errorMsg, libName, version, file);
-            }
-          } catch (readError) {
-            console.log(
-              '[Read error]',
-              (readError as Error).message,
-              libName,
-              version,
-              file
-            );
-          }
+            } catch (hashError) {}
+          } catch (readError) {}
         }
         const uniq = new Map<string, POGHash>();
         for (const h of hashes) {
@@ -121,27 +102,9 @@ function isJS(files: string[]): string[] {
         }
         versionIdx++;
       }
-
-      console.log(
-        `  ↳ completed in ${Date.now() - libStart}ms (${sortedVersions.length} versions, ${versionIdx} processed)`
-      );
       libId++;
     }
-  } catch (e) {
-    console.error('error', (e as Error).message);
-    console.log('write', hashFilename, 'before I die..');
-    console.log('write', libFilename, 'before I die..');
-    fs.writeFileSync(
-      hashFilename.replace('.json', '-error.json'),
-      JSON.stringify(allHashes)
-    );
-    fs.writeFileSync(
-      libFilename.replace('.json', '-error.json'),
-      JSON.stringify(allLibs)
-    );
-  }
-
-  console.log('finish', Date.now() - start, 'ms');
+  } catch (e) {}
   fs.writeFileSync(hashFilename, JSON.stringify(allHashes));
   fs.writeFileSync(libFilename, JSON.stringify(allLibs));
 })();

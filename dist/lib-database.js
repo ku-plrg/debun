@@ -36,16 +36,21 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const escodegen_1 = __importDefault(require("escodegen"));
 const fs_1 = __importStar(require("fs"));
-const path_1 = __importStar(require("path"));
+const path_1 = require("path");
 const sort_1 = __importDefault(require("semver/functions/sort"));
 const valid_1 = __importDefault(require("semver/functions/valid"));
-const fingerprint_collector_1 = __importDefault(require("./fingerprint-collector"));
+const fast_glob_1 = __importDefault(require("fast-glob"));
+const index_1 = __importDefault(require("./fingerprint-collector/index"));
 const rootDir = process.cwd();
+const hashFilename = (0, path_1.join)(rootDir, `../data/all-hash.json`);
+const libFilename = (0, path_1.join)(rootDir, `../data/all-libs.json`);
+const outputDir = (0, path_1.join)(rootDir, '../data');
+fs_1.default.mkdirSync(outputDir, { recursive: true });
+const npmDataDirPath = (0, path_1.join)(rootDir, '../../../misc/crawlers/npm/output');
 const parseVersionString = (version) => {
-    const [major, minor, patch = "0"] = version.split(".");
-    const [patchVersion, patchSuffix = "0"] = patch.split("-");
+    const [major, minor, patch = '0'] = version.split('.');
+    const [patchVersion, patchSuffix = '0'] = patch.split('-');
     return [
         parseInt(major),
         parseInt(minor),
@@ -53,128 +58,78 @@ const parseVersionString = (version) => {
         patchSuffix,
     ];
 };
-const countLines = (code) => code.split("\n").length;
-const hashFilename = (0, path_1.join)(rootDir, `./data/all-hash.json`);
-const libFilename = (0, path_1.join)(rootDir, `./data/all-libs.json`);
-const outputDir = (0, path_1.join)(rootDir, "./data");
-fs_1.default.mkdirSync(outputDir, { recursive: true });
-const cdnDataDirPath = (0, path_1.join)(rootDir, "./data/cdn");
-/**
- * Checks if a version string follows semantic versioning without suffix
- * @param version - The version string to check
- * @returns Array of version numbers or false if invalid
- */
-/**
- * Recursively gets all files from a directory
- * @param dirPath - Directory path to scan
- * @param basePath - Base path for generating relative paths
- * @returns Array of relative file paths
- */
-function getAllFiles(dirPath, basePath = dirPath) {
-    const entries = fs_1.default.readdirSync(dirPath, { withFileTypes: true });
-    let result = [];
-    for (const entry of entries) {
-        const fullPath = path_1.default.join(dirPath, entry.name);
-        const relativePath = path_1.default.relative(basePath, fullPath);
-        if (entry.isFile()) {
-            result.push(relativePath);
-        }
-        else if (entry.isDirectory()) {
-            result = result.concat(getAllFiles(fullPath, basePath));
-        }
-    }
-    return result;
-}
 function isJS(files) {
-    return files.filter((file) => file.endsWith("js") || file.endsWith("mjs") || file.endsWith("cjs"));
+    return files.filter((file) => file.endsWith('js') || file.endsWith('mjs') || file.endsWith('cjs'));
 }
-/**
- * Main function to process libraries and generate hash data
- */
 (async () => {
-    const start = Date.now();
+    var _a;
     let allLibs = {};
     let allHashes = {};
     try {
-        let libIdx = 0;
-        const libNames = fs_1.default.readdirSync(cdnDataDirPath);
+        let libId = 0;
+        const libNames = fs_1.default.readdirSync(npmDataDirPath);
         for (const libName of libNames) {
-            console.log("processing", libName);
-            allLibs[libName] = { id: libIdx, versions: [], hashCnt: [] };
-            const versions = fs_1.default.readdirSync((0, path_1.join)(cdnDataDirPath, libName));
+            let hashes = [];
+            const versions = fs_1.default.readdirSync((0, path_1.join)(npmDataDirPath, libName));
+            const validVersions = versions.filter((version) => (0, valid_1.default)(version) && parseVersionString(version)[3] === '0');
+            const sortedVersions = (0, sort_1.default)(validVersions);
             let versionIdx = 0;
-            const v = versions.filter((version) => (0, valid_1.default)(version) && parseVersionString(version)[3] === "0");
-            for (const version of (0, sort_1.default)(v)) {
-                const hashes = [];
-                const files = getAllFiles((0, path_1.join)(cdnDataDirPath, libName, version));
-                for (const file of isJS(files)) {
+            for (const version of sortedVersions) {
+                hashes = [];
+                const versionPath = (0, path_1.join)(npmDataDirPath, libName, version);
+                const preferredDirs = ['src', 'lib', 'source', 'dist', 'closure', 'js'];
+                const targetDirs = preferredDirs.filter((dir) => {
+                    const dirPath = (0, path_1.join)(versionPath, dir);
+                    return fs_1.default.existsSync(dirPath) && fs_1.default.statSync(dirPath).isDirectory();
+                });
+                const patterns = targetDirs.length > 0
+                    ? targetDirs.map((dir) => `${dir}/**/*`)
+                    : ['**/*'];
+                const files = await (0, fast_glob_1.default)(patterns, { cwd: versionPath });
+                const jsFiles = isJS(files);
+                for (const file of jsFiles) {
                     try {
-                        const code = (0, fs_1.readFileSync)((0, path_1.join)(cdnDataDirPath, libName, version, file), "utf-8");
+                        const code = (0, fs_1.readFileSync)((0, path_1.join)(versionPath, file), 'utf-8');
                         try {
-                            const hash = (0, fingerprint_collector_1.default)(code);
-                            hashes.push(...hash);
-                            const filteredHash = hash.filter((h) => {
-                                const body = escodegen_1.default.generate(h.body);
-                                const lines = countLines(body);
-                                return lines < 8;
-                            });
-                            hashes.push(...filteredHash);
+                            const newHashes = (0, index_1.default)(code);
+                            hashes.push(...newHashes);
                         }
-                        catch (hashError) {
-                            console.log("[Hash error]", hashError.message, libName, version, file);
-                        }
+                        catch (hashError) { }
                     }
-                    catch (readError) {
-                        console.log("[Read error]", readError.message, libName, version, file);
-                    }
+                    catch (readError) { }
                 }
-                const uniqueHashes = Array.from(new Map(hashes.map((hash) => [hash.hash, hash])).values());
-                if (uniqueHashes.length === 0)
-                    continue;
-                allLibs[libName].versions.push(version);
-                allLibs[libName].hashCnt.push(uniqueHashes.length);
-                uniqueHashes.forEach(({ hash, nodes }) => {
-                    if (allHashes[nodes]) {
-                        if (allHashes[nodes][hash]) {
-                            if (allHashes[nodes][hash][libIdx]) {
-                                const prevHash = allHashes[nodes][hash][libIdx];
-                                if (prevHash[prevHash.length - 1][1] === versionIdx - 1)
-                                    allHashes[nodes][hash][libIdx][prevHash.length - 1][1] =
-                                        versionIdx;
-                                else
-                                    allHashes[nodes][hash][libIdx].push([versionIdx, versionIdx]);
-                            }
-                            else {
-                                allHashes[nodes][hash][libIdx] = [[versionIdx, versionIdx]];
-                            }
+                const uniq = new Map();
+                for (const h of hashes) {
+                    if (h.nodes > 6)
+                        uniq.set(h.hash, h);
+                }
+                const uniqueHashes = [...uniq.values()];
+                allLibs[libId] ?? (allLibs[libId] = { name: libName, versions: [], hashCnt: [] });
+                allLibs[libId].versions.push(version);
+                allLibs[libId].hashCnt.push(uniqueHashes.length);
+                for (const { hash, nodes } of uniqueHashes) {
+                    allHashes[nodes] ?? (allHashes[nodes] = {});
+                    (_a = allHashes[nodes])[hash] ?? (_a[hash] = {});
+                    if (allHashes[nodes][hash][libId]) {
+                        const prevHash = allHashes[nodes][hash][libId];
+                        const lastRange = prevHash[prevHash.length - 1];
+                        if (lastRange[1] === versionIdx - 1) {
+                            lastRange[1] = versionIdx;
                         }
                         else {
-                            allHashes[nodes][hash] = {
-                                [libIdx]: [[versionIdx, versionIdx]],
-                            };
+                            prevHash.push([versionIdx, versionIdx]);
                         }
                     }
                     else {
-                        allHashes[nodes] = {
-                            [hash]: {
-                                [libIdx]: [[versionIdx, versionIdx]],
-                            },
-                        };
+                        allHashes[nodes][hash][libId] = [[versionIdx, versionIdx]];
                     }
-                });
+                }
                 versionIdx++;
             }
-            libIdx++;
+            libId++;
         }
     }
-    catch (e) {
-        console.error("error", e.message);
-        console.log("write", hashFilename, "before I die..");
-        console.log("write", libFilename, "before I die..");
-        fs_1.default.writeFileSync(hashFilename.split(".")[0] + "error" + ".json", JSON.stringify(allHashes, null, 2));
-        fs_1.default.writeFileSync(libFilename.split(".")[0] + "error" + ".json", JSON.stringify(allLibs, null, 2));
-    }
-    console.log("finish", Date.now() - start, "ms");
-    fs_1.default.writeFileSync(hashFilename, JSON.stringify(allHashes, null, 2));
-    fs_1.default.writeFileSync(libFilename, JSON.stringify(allLibs, null, 2));
+    catch (e) { }
+    fs_1.default.writeFileSync(hashFilename, JSON.stringify(allHashes));
+    fs_1.default.writeFileSync(libFilename, JSON.stringify(allLibs));
 })();

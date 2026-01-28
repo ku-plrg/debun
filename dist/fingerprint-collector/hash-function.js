@@ -67,15 +67,18 @@ function generatePOGHash(f) {
     const start = f.graph.get(0);
     if (!start)
         throw new Error('Empty CFG: missing exit node in first graph');
-    const result = hashNode(start, f.graph, new Map());
-    const pog_hash = result.hash;
-    const property_count = result.size;
-    return {
-        id: f.id,
-        nodes: property_count,
-        hash: pog_hash,
-        body: f.body,
-    };
+    try {
+        const result = hashNode(start, f.graph, new Map());
+        const pog_hash = result.hash;
+        const size = result.size;
+        return {
+            nodes: size,
+            hash: pog_hash,
+        };
+    }
+    catch (e) {
+        throw e;
+    }
 }
 function poghash(pogs) {
     const hashes = pogs.map(generatePOGHash);
