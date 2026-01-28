@@ -1,14 +1,20 @@
 #!/usr/bin/env node
 
-import { Score } from './types/types';
+import { LibData, Score } from './types/types';
 import { downloadScripts } from './crawler/crawler';
 import fingerprintCollector from './fingerprint-collector';
 import { evaluate } from './lib-scorer';
 import fs from 'fs';
 import path from 'path';
+import { mergeDatabases } from './db-constructor/merge-database';
+import { buildDatabase } from './db-constructor/lib-database';
+import fg from 'fast-glob';
+import semver from 'semver';
+import { exec } from 'child_process';
+import util from 'util';
+const execAsync = util.promisify(exec);
 
 const VERSION = '1.0.2';
-
 function printHelp() {
   console.log(`
 debun - Detecting Bundled JavaScript Libraries on Web using Property-Order Graphs
@@ -17,12 +23,11 @@ Usage:
   debun detect <path>        Detect libraries from local JavaScript files/directory
   debun detect -w <url>      Detect libraries from a web page URL
   debun add <pkg>            Add a new package to the database
-  debun help                 Show this help message
   debun --version            Show version
 
 Options:
-  -v, --verbose              Enable verbose output
   -w, --web                  Treat input as a web URL (for detect command)
+  -h, --help                 Show help message
 
 Examples:
   debun detect ./src/js
@@ -35,27 +40,103 @@ function printVersion() {
   console.log(`debun v${VERSION}`);
 }
 
+export async function addPackage(packageName: string) {
+  function filterSemverOnly(versions: string[]) {
+    return versions
+      .filter((v: string) => v && semver.valid(v))
+      .filter((v) => !semver.prerelease(v));
+  }
+  async function getAllVersions(pkgName: string) {
+    const cmd = `npm view "${pkgName}" versions --json`;
+    console.log(`> ${cmd}`);
+
+    const { stdout } = await execAsync(cmd, { maxBuffer: 1024 * 1024 * 10 });
+    let versions = [];
+
+    try {
+      versions = JSON.parse(stdout.trim());
+    } catch (err) {
+      console.error(`versions JSON parse fail: ${pkgName}`);
+      throw err;
+    }
+
+    if (!Array.isArray(versions)) {
+      versions = [versions];
+    }
+
+    return filterSemverOnly(versions);
+  }
+  console.log(`Adding package: ${packageName}`);
+  function getInstalledPkgDir(baseDir: string, pkgName: string) {
+    if (pkgName.startsWith('@')) {
+      const [scope, name] = pkgName.split('/');
+      return path.join(baseDir, 'node_modules', scope, name);
+    }
+    return path.join(baseDir, 'node_modules', pkgName);
+  }
+
+  try {
+    const versions = await getAllVersions(packageName);
+    console.log(`Found ${versions.length} versions for package ${packageName}`);
+    for (const version of versions) {
+      const tempDir = fs.mkdtempSync(path.join('/tmp', 'debun-'));
+      try {
+        const cmd = `cd "${tempDir}" && npm pack ${packageName}@${version}`;
+        await execAsync(cmd, { maxBuffer: 1024 * 1024 * 10 });
+
+        const tarballName = `${packageName.replace('@', '').replace('/', '-')}-${version}.tgz`;
+        const tarballPath = path.join(tempDir, tarballName);
+        const extractCmd = `tar -xzf "${tarballPath}" -C "${tempDir}"`;
+        await execAsync(extractCmd, { maxBuffer: 1024 * 1024 * 10 });
+
+        const pkgDir = getInstalledPkgDir(
+          tempDir,
+          `package${packageName.startsWith('@') ? `/${packageName.split('/')[1]}` : ''}`
+        );
+        const { allLibs, allHashes } = await buildDatabase(pkgDir);
+        const dbDir = path.join(__dirname, 'data');
+        const existingLibs: LibData = JSON.parse(
+          fs.readFileSync(path.join(dbDir, 'all-libs.json'), 'utf-8')
+        );
+        const existingHashes: any = JSON.parse(
+          fs.readFileSync(path.join(dbDir, 'all-hash.json'), 'utf-8')
+        );
+
+        const { mergedHashData, mergedLibData } = mergeDatabases(
+          existingHashes,
+          existingLibs,
+          allHashes,
+          allLibs
+        );
+        fs.writeFileSync(
+          path.join(dbDir, 'all-hash.json'),
+          JSON.stringify(mergedHashData, null, 2)
+        );
+        fs.writeFileSync(
+          path.join(dbDir, 'all-libs.json'),
+          JSON.stringify(mergedLibData, null, 2)
+        );
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }
+  } catch (err) {
+    console.error(
+      `Failed to get versions for package ${packageName}: ${(err as any).message}`
+    );
+    return;
+  }
+}
 export async function detectLibrary(urlOrpath: string, isWeb: boolean = false) {
   let filePaths: string[] = [];
 
-  if (
-    isWeb ||
-    urlOrpath.startsWith('http://') ||
-    urlOrpath.startsWith('https://')
-  ) {
+  if (isWeb) {
     filePaths = await downloadScripts(urlOrpath);
   } else {
-    const collectFilesRecursively = (p: string): string[] => {
-      const stat = fs.statSync(p);
-      if (stat.isFile()) return [p];
-      return fs.readdirSync(p, { withFileTypes: true }).flatMap((entry) => {
-        const fullPath = path.join(p, entry.name);
-        if (entry.isDirectory()) return collectFilesRecursively(fullPath);
-        if (entry.isFile() && fullPath.endsWith('.js')) return [fullPath];
-        return [];
-      });
-    };
-    filePaths = collectFilesRecursively(urlOrpath);
+    filePaths = await fg('**/*.{js,cjs,mjs}', {
+      cwd: urlOrpath,
+      absolute: true,
+    });
   }
 
   const mergeUnique = (target: string[], source: string[]) => {
@@ -175,6 +256,7 @@ async function main() {
         console.log('Usage: debun add <package-name>');
         process.exit(1);
       }
+      await addPackage(packageName);
       break;
     }
     default: {

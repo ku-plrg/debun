@@ -136,9 +136,7 @@ async function downloadScripts(targetUrl, headless = true, rootFolder = 'data/cr
             timeout: 90000,
         });
     }
-    catch (err) {
-        `Error navigating to ${reachableUrl}: ${err.message}`;
-    }
+    catch (err) { }
     const preloadScripts = await getPreloadScripts(page);
     preloadScripts.forEach((scriptUrl) => jsFiles.add(scriptUrl));
     const inlineScripts = await getInlineScripts(page);
@@ -149,7 +147,6 @@ async function downloadScripts(targetUrl, headless = true, rootFolder = 'data/cr
         const filepath = path_1.default.join(domainFolder, `browser-script-${idx}.js`);
         fs_1.default.writeFileSync(filepath, inlineScript, 'utf8');
     });
-    const errorUrls = [];
     const allFilePaths = [];
     let downloadedCount = 0;
     for (const fileUrl of jsFiles) {
@@ -163,9 +160,7 @@ async function downloadScripts(targetUrl, headless = true, rootFolder = 'data/cr
             if (jsFiles.size > 5) {
             }
         }
-        catch (error) {
-            errorUrls.push(fileUrl);
-        }
+        catch (error) { }
     }
     return allFilePaths;
 }

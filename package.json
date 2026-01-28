@@ -18,7 +18,7 @@
   "dependencies": {
     "axios": "^1.13.2",
     "escodegen": "^2.1.0",
-    "estree-walker": "^3.0.3",
+    "estree-walker": "^2.0.2",
     "fast-glob": "^3.3.3",
     "meriyah": "^7.0.0",
     "papaparse": "5.5.3",

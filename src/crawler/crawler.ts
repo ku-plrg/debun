@@ -149,9 +149,7 @@ async function downloadScripts(
       waitUntil: 'networkidle2',
       timeout: 90000,
     });
-  } catch (err) {
-    `Error navigating to ${reachableUrl}: ${(err as any).message}`;
-  }
+  } catch (err) {}
 
   const preloadScripts = await getPreloadScripts(page);
   preloadScripts.forEach((scriptUrl) => jsFiles.add(scriptUrl));
@@ -172,7 +170,6 @@ async function downloadScripts(
     fs.writeFileSync(filepath, inlineScript, 'utf8');
   });
 
-  const errorUrls = [];
   const allFilePaths: string[] = [];
   let downloadedCount = 0;
 
@@ -188,9 +185,7 @@ async function downloadScripts(
       downloadedCount++;
       if (jsFiles.size > 5) {
       }
-    } catch (error) {
-      errorUrls.push(fileUrl);
-    }
+    } catch (error) {}
   }
   return allFilePaths;
 }

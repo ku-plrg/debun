@@ -1,4 +1,4 @@
-import { HashData, LibData } from './types/types';
+import { HashData, LibData } from '../types/types';
 
 export function mergeHashData(
   data1: HashData,
