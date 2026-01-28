@@ -2,13 +2,14 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import puppeteer, { Browser, Page } from 'puppeteer';
+import { logger } from '../utils/logger';
 
 const logFilePath = path.join(__dirname, 'error-log.txt');
 
 function logError(msg: string) {
-  console.error(msg);
+  logger.error(msg);
   fs.appendFile(logFilePath, msg + '\n', (fsErr) => {
-    if (fsErr) console.error('Failed to write to log file:', fsErr);
+    if (fsErr) logger.error('Failed to write to log file:', fsErr);
   });
 }
 
@@ -38,11 +39,11 @@ async function downloadFileFallback(url: string, filePath: string) {
 
 async function downloadFileFallback2(url: string, filePath: string) {
   try {
-    console.log(`Fallback downloading: ${url}`);
+    logger.debug(`Fallback downloading: ${url}`);
     const response = await axios({
       method: 'get',
       url,
-      responseType: 'arraybuffer', // Binary data
+      responseType: 'arraybuffer',
       timeout: 5000,
     });
 
@@ -51,15 +52,15 @@ async function downloadFileFallback2(url: string, filePath: string) {
     }
 
     fs.writeFileSync(filePath, response.data);
-    console.log(`Fallback saved: ${filePath}`);
+    logger.debug(`Fallback saved: ${filePath}`);
   } catch (err) {
-    console.error(`Fallback download failed: ${(err as any).message}`);
+    logger.error(`Fallback download failed: ${(err as any).message}`);
   }
 }
 
 async function downloadFile(url: string, filePath: string) {
   return new Promise((resolve: (value: unknown) => void) => {
-    console.log(`Downloading: ${url}`);
+    logger.debug(`Downloading: ${url}`);
     axios({
       method: 'get',
       url,
@@ -72,7 +73,7 @@ async function downloadFile(url: string, filePath: string) {
           response.data.pipe(file);
           file.on('finish', () => {
             file.close(() => {
-              console.log(`Saved: ${filePath}`);
+              logger.debug(`Saved: ${filePath}`);
               resolve(true);
             });
           });
@@ -140,7 +141,7 @@ async function downloadScripts(
   headless: boolean = true,
   rootFolder: string = 'data/crawled'
 ) {
-  console.time(`Download-${targetUrl}`);
+  logger.time(`Download-${targetUrl}`);
   let browser: Browser;
   try {
     browser = await puppeteer.launch({
@@ -164,12 +165,14 @@ async function downloadScripts(
     targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`
   );
   try {
+    logger.info(`Navigating to ${reachableUrl.toString()}...`);
     await page.goto(reachableUrl.toString(), {
       waitUntil: 'networkidle2',
       timeout: 90000,
     });
+    logger.info('Page loaded successfully');
   } catch (err) {
-    console.error(
+    logger.error(
       `Error navigating to ${reachableUrl}: ${(err as any).message}`
     );
   }
@@ -193,10 +196,12 @@ async function downloadScripts(
     fs.writeFileSync(filepath, inlineScript, 'utf8');
   });
 
-  console.log(`Found ${jsFiles.size} JS files. Downloading...`);
+  logger.info(`Found ${jsFiles.size} JS files. Downloading...`);
 
   const errorUrls = [];
   const allFilePaths: string[] = [];
+  let downloadedCount = 0;
+  
   for (const fileUrl of jsFiles) {
     try {
       const filePath = truncateFileName(
@@ -206,6 +211,11 @@ async function downloadScripts(
       allFilePaths.push(fullFilePath);
       guardFolderSync(path.dirname(fullFilePath));
       await downloadFile(fileUrl, fullFilePath);
+      downloadedCount++;
+      
+      if (jsFiles.size > 5) {
+        logger.progress(downloadedCount, jsFiles.size, 'Downloading JS files');
+      }
     } catch (error) {
       const errorMessage = `Failed to download: ${fileUrl} - ${error}\n`;
       logError(errorMessage);
@@ -213,15 +223,15 @@ async function downloadScripts(
     }
   }
 
-  console.log(`All JS files saved to ${domainFolder}`);
+  logger.info(`All JS files saved to ${domainFolder}`);
   if (errorUrls.length > 0)
-    console.log(
+    logger.warn(
       `However, there were errors downloading the following ${
         errorUrls.length
       } files:\n
           -${errorUrls.join('\n-')}`
     );
-  console.timeEnd(`Download-${targetUrl}`);
+  logger.timeEnd(`Download-${targetUrl}`);
   return allFilePaths;
 }
 

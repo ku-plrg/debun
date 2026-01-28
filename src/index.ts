@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
-import { POGHash } from './types/pog';
+import { Score, POGHash } from './types/types';
 import { downloadScripts } from './crawler/crawler';
 import fingerprintCollector from './fingerprint-collector';
 import { evaluate } from './lib-scorer';
 import fs from 'fs';
 import path from 'path';
+import { logger } from './utils/logger';
 
 export async function detectLibrary(urlOrpath: string) {
-  console.log(`Detecting libraries from: ${urlOrpath}`);
-  const hashes: POGHash[] = [];
+  logger.info(`Detecting libraries from: ${urlOrpath}`);
   let filePaths: string[] = [];
   if (urlOrpath.startsWith('http://') || urlOrpath.startsWith('https://')) {
     filePaths = await downloadScripts(urlOrpath);
@@ -26,40 +26,63 @@ export async function detectLibrary(urlOrpath: string) {
     };
     filePaths = collectFilesRecursively(urlOrpath);
   }
-  for (const filePath of filePaths) {
+
+  logger.debug(`Found ${filePaths.length} JavaScript files`);
+  const mergeUnique = (target: string[], source: string[]) => {
+    for (const item of source) {
+      if (!target.includes(item)) target.push(item);
+    }
+  };
+  const merged = new Map<string, Score>();
+
+  for (let i = 0; i < filePaths.length; i++) {
+    const filePath = filePaths[i];
     let raw;
     try {
       raw = fs.readFileSync(filePath, 'utf-8');
     } catch (e) {
+      logger.warn(`Failed to read file: ${filePath}`);
       continue;
     }
     const fingerprints = fingerprintCollector(raw);
-    for (const hash of fingerprints) {
-      hashes.push(hash);
+    const hashes: Record<number, string[]> = {};
+    for (const fp of fingerprints) {
+      if (!hashes[fp.nodes]) {
+        hashes[fp.nodes] = [];
+      }
+      if (!hashes[fp.nodes].includes(fp.hash)) {
+        hashes[fp.nodes].push(fp.hash);
+      }
+    }
+
+    const scores = evaluate(hashes, {
+      SCORE_THRESHOLD: 0.2,
+      MIN_FUNCTION_COUNT: 5,
+    });
+    for (const score of scores) {
+      const existing = merged.get(score.libName);
+      if (!existing) {
+        merged.set(score.libName, { ...score });
+        continue;
+      }
+
+      mergeUnique(existing.topVersions, score.topVersions);
+      mergeUnique(existing.type2Versions, score.type2Versions);
+      mergeUnique(existing.type3Versions, score.type3Versions);
     }
   }
-  const uniqueHashes = Array.from(
-    new Map(hashes.map((hash) => [hash.hash, hash])).values()
-  );
-  const h: Record<number, string[]> = {};
-  for (const hash of uniqueHashes) {
-    if (!h[hash.nodes]) {
-      h[hash.nodes] = [];
-    }
-    h[hash.nodes].push(hash.hash);
-  }
-  const scores = evaluate(h, { threshold: 0.2 });
+  const scores = [...merged.values()];
   if (scores.length === 0) {
-    console.log('❌ No libraries detected.');
+    logger.info('No libraries detected.');
     return;
   }
-  console.log('✅ DETECTED LIBRARIES:');
+  logger.info('✅ DETECTED LIBRARIES:');
   for (const score of scores) {
     const type3Version = score.type3Versions.join('@');
     const type2Version = score.type2Versions.join('@');
     const topVersion = score.topVersions.join('@');
     const version = type3Version || type2Version || topVersion;
-    console.log(
+    logger.info(
       `${score.libName === 'react-dom' ? 'react' : score.libName}@${version}`
     );
   }
@@ -68,11 +91,11 @@ export async function detectLibrary(urlOrpath: string) {
 if (require.main === module) {
   const [, , url] = process.argv;
   if (!url) {
-    console.error('Usage: ts-node src/index.ts <url>');
+    logger.error('Usage: ts-node src/index.ts <url>');
     process.exit(1);
   }
   detectLibrary(url).catch((error) => {
-    console.error('Failed to detect libraries:', error);
+    logger.error('Failed to detect libraries:', error);
     process.exit(1);
   });
 }

@@ -1,147 +1,87 @@
-import { ESTree, parse } from 'meriyah';
-import { Expression, Statement } from 'meriyah/dist/src/estree';
-import { Function } from '../types/pog';
-import walk from '../utils/walk';
+import { parse } from 'meriyah';
+import { Function } from '../types/types';
+import { walk } from 'estree-walker';
+import * as ESTree from 'estree';
 
-const FUNC_ID = true;
-let functions: Function[] = [];
+type FunctionNode =
+  | ESTree.FunctionDeclaration
+  | ESTree.FunctionExpression
+  | ESTree.ArrowFunctionExpression;
 
-function recordFunction(
-  node:
-    | ESTree.FunctionDeclaration
-    | ESTree.FunctionExpression
-    | ESTree.ArrowFunctionExpression
-): void {
-  if (!node.body) return;
-  const body = stripFunctions(node.body);
-  if (FUNC_ID) {
-    if (node.type === 'ArrowFunctionExpression' && node.expression)
-      functions.push({
-        id: getId(body),
-        body: {
-          ...node,
-          body: body as Expression,
-        },
-      });
-    else
-      functions.push({
-        id: getId(body),
-        body: {
-          ...node,
-          body: {
-            type: 'BlockStatement',
-            body: [body as Statement],
-          },
-        },
-      });
-    return;
-  }
-
-  functions.push({
-    body,
-  });
-}
-
-function stripFunctions(node: ESTree.Node): ESTree.Node {
-  if (!node) return node;
-
-  if (
+function isFunctionNode(node: ESTree.BaseNode): node is FunctionNode {
+  return (
     node.type === 'FunctionDeclaration' ||
     node.type === 'FunctionExpression' ||
     node.type === 'ArrowFunctionExpression'
-  ) {
-    if (!node.body) return node;
-    recordFunction(node);
+  );
+}
 
-    return node.type === 'FunctionDeclaration'
-      ? { type: 'EmptyStatement' }
-      : ({
-          type: node.type,
-          id: null,
-          params: [],
-          generator: false,
-          async: false,
-          body: {
-            type: 'BlockStatement',
-            body: [],
-          },
-        } as ESTree.FunctionExpression | ESTree.ArrowFunctionExpression);
-  }
+function recordFunction(node: FunctionNode, functions: Function[]): void {
+  const body = stripFunctions(node.body, functions);
+  functions.push({ body });
+}
 
-  // Process all child nodes
-  Object.entries(node).forEach(([key, value]) => {
-    if (value && typeof value === 'object') {
-      if (Array.isArray(value)) {
-        for (let i = 0; i < value.length; i++) {
-          if (value[i] && typeof value[i] === 'object') {
-            value[i] = stripFunctions(value[i]);
+function stripFunctions(node: ESTree.Node, functions: Function[]): ESTree.Node {
+  walk(node as ESTree.Node, {
+    enter(child) {
+      if (isFunctionNode(child)) {
+        recordFunction(child, functions);
+        const createEmptyBody = (): ESTree.BlockStatement => ({
+          type: 'BlockStatement',
+          body: [],
+        });
+
+        const replacement = (() => {
+          if (
+            child.type === 'FunctionDeclaration' ||
+            child.type === 'FunctionExpression'
+          ) {
+            return {
+              ...child,
+              body: createEmptyBody(),
+            } as ESTree.FunctionDeclaration | ESTree.FunctionExpression;
           }
-        }
-      } else {
-        (node as any)[key] = stripFunctions(value);
+
+          return {
+            ...child,
+            body: child.expression
+              ? ({ type: 'Identifier', name: '_' } as ESTree.Identifier)
+              : createEmptyBody(),
+          } as ESTree.ArrowFunctionExpression;
+        })();
+
+        this.replace(replacement);
+        return;
       }
-    }
+    },
   });
 
   return node;
 }
 
-// check if JSCA_ id symbol is injected in the function body
-function getId(node: ESTree.Node): string {
-  let value: string | undefined;
-  walk(node, {
-    CallExpression(node: ESTree.Node) {
-      if (
-        node.type === 'CallExpression' &&
-        node.callee.type === 'Identifier' &&
-        node.callee.name === 'Symbol' &&
-        node.arguments.length > 0 &&
-        node.arguments[0].type === 'Literal' &&
-        typeof node.arguments[0].value === 'string'
-      ) {
-        const symbolValue = node.arguments[0].value;
-        if (value === undefined && symbolValue.startsWith('JSCA_')) {
-          value = symbolValue;
-        }
-      }
-    },
-    TemplateLiteral(node: ESTree.Node) {
-      if (node.type !== 'TemplateLiteral') return;
-      const templateValue = node.quasis[0]?.value.raw;
-      if (value === undefined && templateValue.startsWith('JSCA_')) {
-        value = templateValue;
-      }
-    },
-    Literal(node: ESTree.Node) {
-      if (
-        node.type === 'Literal' &&
-        value === undefined &&
-        typeof node.value === 'string' &&
-        node.value.startsWith('JSCA_')
-      ) {
-        value = node.value;
-      }
-    },
-  });
-  return value || '';
-}
-
 function extractFunctions(code: string): Function[] {
-  functions = [];
-  let ast: ESTree.Program;
-  try {
-    ast = parse(code, {
-      next: true,
-      module: false,
-    });
-  } catch (e) {
-    ast = parse(code, {
-      next: true,
-      module: true,
-    });
+  const functions: Function[] = [];
+  let ast: ESTree.Node | undefined;
+  const sourceTypes: Array<'script' | 'module' | 'commonjs'> = [
+    'script',
+    'module',
+    'commonjs',
+  ];
+  let lastError: unknown;
+  for (const sourceType of sourceTypes) {
+    try {
+      ast = parse(code, {
+        next: true,
+        sourceType,
+      }) as ESTree.Node;
+      break;
+    } catch (e) {
+      lastError = e;
+    }
   }
-  stripFunctions(ast);
+  if (!ast) throw lastError;
 
+  stripFunctions(ast, functions);
   return functions;
 }
 

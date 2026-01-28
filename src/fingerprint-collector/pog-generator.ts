@@ -1,4 +1,6 @@
-import { ESTree } from 'meriyah';
+import * as ESTree from 'estree';
+import { walk } from 'estree-walker';
+import { builtIns } from '../utils/builtins';
 import {
   Env,
   Function,
@@ -7,481 +9,124 @@ import {
   POGNode,
   POGState,
   PrevId,
-} from '../types/pog';
-import { builtIns } from '../utils/builtins';
+} from '../types/types';
 
-let pogState: POGState;
 const RESULT = '@@RESULT';
 const IGNORE_TYPEOF = true;
 const SKIP_BUILTIN: string[] = builtIns;
 
-let BRANCH_BYPASSING = true;
-let PATH_CLONING = true;
-let BRANCH_FLIPPING = true;
+const BRANCH_BYPASSING = true;
+const PATH_CLONING = true;
+const BRANCH_FLIPPING = true;
 
-function visit(node: ESTree.Node): void {
+const EXPRESSION_TYPES: ReadonlySet<ESTree.Expression['type']> = new Set([
+  'ArrayExpression',
+  'ArrowFunctionExpression',
+  'AssignmentExpression',
+  'AwaitExpression',
+  'BinaryExpression',
+  'CallExpression',
+  'ChainExpression',
+  'ClassExpression',
+  'ConditionalExpression',
+  'FunctionExpression',
+  'Identifier',
+  'ImportExpression',
+  'Literal',
+  'LogicalExpression',
+  'MemberExpression',
+  'MetaProperty',
+  'NewExpression',
+  'ObjectExpression',
+  'SequenceExpression',
+  'TaggedTemplateExpression',
+  'TemplateLiteral',
+  'ThisExpression',
+  'UnaryExpression',
+  'UpdateExpression',
+  'YieldExpression',
+]);
+
+function isExpression(node: ESTree.Node): node is ESTree.Expression {
+  return EXPRESSION_TYPES.has(node.type as ESTree.Expression['type']);
+}
+function is_typeof(node: ESTree.ConditionalExpression): boolean {
+  return (
+    node.consequent.type === 'Literal' &&
+    node.consequent.value === 'undefined' &&
+    node.test.type === 'BinaryExpression' &&
+    node.test.operator === '===' &&
+    node.test.left.type === 'UnaryExpression' &&
+    node.test.left.operator === 'void' &&
+    node.test.left.argument.type === 'Literal' &&
+    node.test.left.argument.value === 0 &&
+    IGNORE_TYPEOF
+  );
+}
+
+function createNode(
+  type: 'branch' | 'block',
+  pogState: POGState,
+  loop?: boolean,
+  value?: Op
+): POGNode {
+  const id = pogState.currentId++;
+  const node: POGNode =
+    type === 'branch'
+      ? { id, type, then: undefined, else: undefined }
+      : {
+          id,
+          type,
+          next: undefined,
+          loop: loop ?? false,
+          op: value ? [value] : undefined,
+        };
+  pogState.nodes.set(id, node);
+  return node;
+}
+function connect(to: number, pogState: POGState) {
+  pogState.prevIds.forEach((from) => connectPair(from, to, pogState));
+}
+function connectPair(from: PrevId, to: number, pogState: POGState) {
+  const [node, env, context] = from;
   switch (node.type) {
-    case 'ExpressionStatement':
-      visit(node.expression);
-      break;
-    case 'BlockStatement':
-      node.body.forEach(visit);
-      break;
-    case 'ReturnStatement':
-      node.argument && visit(node.argument);
-      connect_end();
-      break;
-    case 'BreakStatement':
-      const loop_break = pogState.loopStack.pop();
-      if (!loop_break) return;
-      loop_break.break.push(...pogState.prevIds);
-      pogState.loopStack.push(loop_break);
-      pogState.prevIds = [];
-      break;
-    case 'ContinueStatement':
-      const loop_continue = pogState.loopStack.pop();
-      if (!loop_continue) return;
-      loop_continue.continue.push(...pogState.prevIds);
-      pogState.loopStack.push(loop_continue);
-      pogState.prevIds = [];
-      break;
-    case 'IfStatement': {
-      const [thenPrevIds, elsePrevIds] = addBranch(node.test);
-      pogState.prevIds = thenPrevIds;
-      visit(node.consequent);
-      const thenPrev = [...pogState.prevIds];
-      pogState.prevIds = elsePrevIds;
-      node.alternate && visit(node.alternate);
-      pogState.prevIds = thenPrev.concat(pogState.prevIds);
-      break;
-    }
-    case 'ThrowStatement':
-      visit(node.argument);
-      connect(pogState.exceptionId);
-      pogState.prevIds = [];
-      break;
-    case 'TryStatement':
-      visit(node.block);
-      node.handler && visit(node.handler);
-      node.finalizer && visit(node.finalizer);
-      break;
-    case 'WhileStatement': {
-      const whileLoop = addLoop();
-      const [thenPrevIds, elsePrevIds] = addBranch(node.test);
-      pogState.prevIds = thenPrevIds;
-      const whileLoopstack = loopVisitor(node.body);
-      endLoop(whileLoopstack, whileLoop.id, elsePrevIds);
-      break;
-    }
-    case 'DoWhileStatement': {
-      const doWhileLoop = addLoop();
-      const doWhileLoopstack = loopVisitor(node.body);
-      const [thenPrevIds, elsePrevIds] = addBranch(node.test);
-      pogState.prevIds = thenPrevIds;
-      endLoop(doWhileLoopstack, doWhileLoop.id, elsePrevIds);
-      break;
-    }
-    case 'ForStatement': {
-      node.init && visit(node.init);
-      const forLoop = addLoop();
-      if (node.test) {
-        const [thenPrevIds, elsePrevIds] = addBranch(node.test);
-        pogState.prevIds = thenPrevIds;
-        const forLoopstack = loopVisitor(node.body);
-        node.update && visit(node.update);
-        endLoop(forLoopstack, forLoop.id, elsePrevIds);
+    case 'branch':
+      if (node.then && node.else) throw new Error('Condition has 2 branches');
+      if (context) {
+        node.then = to;
       } else {
-        const forLoopstack = loopVisitor(node.body);
-        endLoop(forLoopstack, forLoop.id, []);
+        node.else = to;
       }
-      break;
-    }
-    case 'ForInStatement':
-    case 'ForOfStatement':
-      visit(node.left);
-      node.right && visit(node.right);
-      const forInLoop = addLoop();
-      const [thenPrevIds, elsePrevIds] = addemptyBranch();
-      pogState.prevIds = thenPrevIds;
-      const forInLoopstack = loopVisitor(node.body);
-      endLoop(forInLoopstack, forInLoop.id, elsePrevIds);
-      break;
-    case 'SwitchStatement':
-      pogState.loopStack.push({ break: [], continue: [] });
-      visit(node.discriminant);
-      node.cases.forEach((c) => {
-        c.test && visit(c.test);
-        const [thenPrevIds, elsePrevIds] = addemptyBranch();
-        pogState.prevIds = thenPrevIds;
-        c.consequent.forEach(visit);
-        pogState.prevIds = elsePrevIds.concat(pogState.prevIds);
-      });
-      const switchcase = pogState.loopStack.pop();
-      if (!switchcase) throw new Error('Loop stack is empty');
-      pogState.prevIds = switchcase.break.concat(pogState.prevIds);
-      break;
-    case 'VariableDeclaration':
-      node.declarations.forEach((decl) => {
-        if (decl.init === null) return;
-        visit(decl.init);
-        if (decl.id.type === 'Identifier') {
-          const name = decl.id.name;
-          pogState.prevIds.forEach(([node, env, context]) => {
-            env[name] = env[RESULT];
-          });
-        }
-      });
-      break;
-    case 'Identifier':
-      const name = node.name;
-      pogState.prevIds.forEach(([node, env, context]) => {
-        env[RESULT] = env[name] ?? 'pos';
-      });
-      break;
-    case 'Literal':
-      if (
-        node.value === null ||
-        node.value === 0 ||
-        node.value === false ||
-        node.value === '' ||
-        node.value === 0n
-      ) {
-        pogState.prevIds.forEach(([node, env, context]) => {
-          env[RESULT] = 'falsy';
-        });
-      } else
-        pogState.prevIds.forEach(([node, env, context]) => {
-          env[RESULT] = 'truthy';
-        });
-      break;
-    case 'ThisExpression':
-      pogState.prevIds.forEach(([node, env, context]) => {
-        env[RESULT] = 'pos';
-      });
-      break;
-    case 'ArrayExpression':
-      node.elements.forEach((elem) => elem && visit(elem));
-      pogState.prevIds.forEach(([node, env, context]) => {
-        env[RESULT] = 'pos';
-      });
-      break;
-    case 'ObjectExpression':
-      const properties = node.properties
-        .filter((prop) => prop.type === 'Property')
-        .filter(
-          (prop) =>
-            !['AssignmentPattern', 'ObjectPattern', 'ArrayPattern'].includes(
-              prop.value.type
-            )
-        );
-      properties.forEach((prop) => {
-        visit(prop.key);
-        visit(prop.value);
-        const key =
-          prop.key.type === 'Identifier'
-            ? prop.key.name
-            : prop.key.type === 'Literal' && typeof prop.key.value === 'string'
-            ? prop.key.value
-            : '[]';
-        addOp({
-          type: 'property-update',
-          value: key,
-        });
-      });
-      pogState.prevIds.forEach(([node, env, context]) => {
-        env[RESULT] = 'truthy';
-      });
-      break;
-    case 'UnaryExpression':
-      if (node.operator === '!') {
-        visit(node.argument);
-        pogState.prevIds.forEach(([node, env, context]) => {
-          switch (env[RESULT]) {
-            case 'truthy':
-              env[RESULT] = 'falsy';
-              break;
-            case 'falsy':
-              env[RESULT] = 'truthy';
-              break;
-            case 'pos':
-              env[RESULT] = 'neg';
-              break;
-            case 'neg':
-              env[RESULT] = 'pos';
-              break;
-            case 'bottom':
-              env[RESULT] = 'bottom';
-              break;
-          }
-        });
-      } else {
-        visit(node.argument);
-        pogState.prevIds.forEach(([node, env, context]) => {
-          env[RESULT] = 'pos';
-        });
-      }
-      break;
-    case 'UpdateExpression':
-      visit(node.argument);
-      if (node.argument.type === 'MemberExpression') {
-        visit(node.argument.object);
-        visit(node.argument.property);
-        const value =
-          !node.argument.computed &&
-          node.argument.property.type === 'Identifier'
-            ? node.argument.property.name
-            : node.argument.computed &&
-              node.argument.property.type === 'Literal' &&
-              typeof node.argument.property.value === 'string'
-            ? node.argument.property.value
-            : '[]';
-        addOp({
-          type: 'property-update',
-          value,
-        });
-        pogState.prevIds.forEach(([node, env, context]) => {
-          env[RESULT] = 'pos';
-        });
-      } else {
-        visit(node.argument);
-        pogState.prevIds.forEach(([node, env, context]) => {
-          env[RESULT] = 'pos';
-        });
-      }
-      break;
-    case 'BinaryExpression':
-      visit(node.left);
-      visit(node.right);
-      if (
-        node.operator === '!==' ||
-        node.operator === '!=' ||
-        node.operator === '>=' ||
-        node.operator === '<='
-      ) {
-        pogState.prevIds.forEach(([node, env, context]) => {
-          env[RESULT] = 'neg';
-        });
-      } else
-        pogState.prevIds.forEach(([node, env, context]) => {
-          env[RESULT] = 'pos';
-        });
-      break;
-    case 'AssignmentExpression':
-      if (node.left.type === 'MemberExpression') {
-        visit(node.left.object);
-        visit(node.left.property);
-        visit(node.right);
-        const value =
-          !node.left.computed && node.left.property.type === 'Identifier'
-            ? node.left.property.name
-            : node.left.computed &&
-              node.left.property.type === 'Literal' &&
-              typeof node.left.property.value === 'string'
-            ? node.left.property.value
-            : '[]';
-        addOp({
-          type: 'property-update',
-          value,
-        });
-        pogState.prevIds.forEach(([node, env, context]) => {
-          env[RESULT] = 'pos';
-        });
-      }
-      if (node.left.type === 'Identifier') {
-        visit(node.right);
-        const name = node.left.name;
-        pogState.prevIds.forEach(([node, env, context]) => {
-          env[name] = env[RESULT];
-          env[RESULT] = 'pos';
-        });
-      }
-      break;
-    case 'LogicalExpression': {
-      if (node.operator === '&&') {
-        const [thenPrevIds, elsePrevIds] = addBranch(node.left);
-        pogState.prevIds = thenPrevIds;
-        visit(node.right);
-        elsePrevIds.forEach(([node, env, context]) => (env[RESULT] = 'falsy'));
-        pogState.prevIds = pogState.prevIds.concat(elsePrevIds);
-      } else if (node.operator === '||') {
-        const [thenPrevIds, elsePrevIds] = addBranch(node.left);
-        pogState.prevIds = elsePrevIds;
-        visit(node.right);
-        thenPrevIds.forEach(([node, env, context]) => (env[RESULT] = 'truthy'));
-        pogState.prevIds = pogState.prevIds.concat(thenPrevIds);
-      } else {
-        visit(node.left);
-        const [thenPrevIds, elsePrevIds] = addemptyBranch();
-        pogState.prevIds = thenPrevIds;
-        visit(node.right);
-        elsePrevIds.forEach(([node, env, context]) => (env[RESULT] = 'falsy'));
-        pogState.prevIds = pogState.prevIds.concat(elsePrevIds);
-      }
-      break;
-    }
-    case 'MemberExpression':
-      if (
-        node.object.type === 'Identifier' &&
-        SKIP_BUILTIN.includes(node.object.name)
-      ) {
-        visit(node.property);
-        pogState.prevIds.forEach(([node, env, context]) => {
-          env[RESULT] = 'pos';
-        });
-        break;
-      }
-      visit(node.object);
-      visit(node.property);
-      const value =
-        !node.computed && node.property.type === 'Identifier'
-          ? node.property.name
-          : node.computed &&
-            node.property.type === 'Literal' &&
-            typeof node.property.value === 'string'
-          ? node.property.value
-          : '[]';
-      addOp({
-        type: 'property',
-        value,
-      });
-      pogState.prevIds.forEach(([node, env, context]) => {
-        env[RESULT] = 'pos';
-      });
-      break;
-    case 'ConditionalExpression': {
-      if (is_typeof(node)) {
-        pogState.prevIds.forEach(([node, env, context]) => {
-          env[RESULT] = 'pos';
-        });
-        break;
-      }
-      const [thenPrevIds, elsePrevIds] = addBranch(node.test);
-      pogState.prevIds = thenPrevIds;
-      visit(node.consequent);
-      const thenPrev = [...pogState.prevIds];
-      pogState.prevIds = elsePrevIds;
-      visit(node.alternate);
-      pogState.prevIds = thenPrev.concat(pogState.prevIds);
-      break;
-    }
-    case 'CallExpression':
-      visit(node.callee);
-      node.arguments.forEach(visit);
-      pogState.prevIds.forEach((prevId) => {
-        prevId[1] = {};
-        prevId[1][RESULT] = 'pos';
-      });
-      break;
-    case 'NewExpression':
-      visit(node.callee);
-      node.arguments.forEach(visit);
-      pogState.prevIds.forEach((prevId) => {
-        prevId[1] = {};
-        prevId[1][RESULT] = 'pos';
-      });
-      break;
-    case 'SequenceExpression':
-      node.expressions.forEach(visit);
-      break;
-    default: {
-      Object.entries(node).forEach(([key, value]) => {
-        if (value && typeof value === 'object') {
-          if (Array.isArray(value)) {
-            for (let i = 0; i < value.length; i++) {
-              if (value[i] && typeof value[i] === 'object') {
-                visit(value[i]);
-              }
-            }
-          } else {
-            visit(value);
-          }
-        }
-      });
-      if (
-        node.type === 'MetaProperty' ||
-        node.type === 'Super' ||
-        node.type === 'TemplateLiteral' ||
-        node.type === 'TaggedTemplateExpression' ||
-        node.type === 'AwaitExpression' ||
-        node.type === 'YieldExpression' ||
-        node.type === 'ImportExpression' ||
-        node.type === 'ChainExpression' ||
-        node.type === 'ClassExpression' ||
-        node.type === 'Import'
-      ) {
-        pogState.prevIds.forEach(([node, env, context]) => {
-          env[RESULT] = 'pos';
-        });
-      }
-    }
+      return;
+    case 'block':
+      if (node.next) throw new Error('Node has already been connected');
+      node.next = to;
+      return;
+    case 'start':
+      if (node.next) throw new Error('Start Node has already been connected');
+      node.next = to;
+      return;
   }
 }
-
-export function extractPOG(
-  node: ESTree.Node,
-  options?: [boolean, boolean, boolean]
-): POGState {
-  BRANCH_FLIPPING = options?.[0] ?? true;
-  BRANCH_BYPASSING = options?.[1] ?? true;
-  PATH_CLONING = options?.[2] ?? true;
-
-  const start: POGNode = { id: 0, type: 'start' };
-  pogState = {
-    currentId: 1,
-    prevIds: [[start, {}]],
-    nodes: new Map<number, POGNode>([
-      [0, start],
-      [-1, { type: 'exit', id: -1 }],
-      [-2, { type: 'exception-exit', id: -2 }],
-    ]),
-    loopStack: [],
-    endId: -1,
-    exceptionId: -2,
-  };
-  visit(node);
-  connect_end();
-  return pogState;
-}
-
-function connect_end() {
-  connect(pogState.endId);
+function connect_end(pogState: POGState) {
+  connect(pogState.endId, pogState);
   pogState.prevIds = [];
 }
 
-function join(left: Env, right: Env): Env {
-  const result: Env = {};
-  for (const key in left) {
-    const leftValue = left[key];
-    const rightValue = right[key];
-    if (leftValue === rightValue) {
-      result[key] = leftValue;
-    } else if (leftValue === 'bottom') {
-      result[key] = rightValue;
-    } else if (rightValue === 'bottom') {
-      result[key] = leftValue;
-    } else {
-      delete result[key];
-    }
-  }
-  return result;
-}
-
-function merge(prevIds: PrevId[]): Env {
-  const envs = prevIds.map(([, env]) => env);
-  return envs.reduce(join, {});
-}
-function addemptyBranch(): [PrevId[], PrevId[]] {
+function addemptyBranch(pogState: POGState): [PrevId[], PrevId[]] {
   const thenPrevIds: PrevId[] = [];
   const elsePrevIds: PrevId[] = [];
-  const condition = createNode('branch');
+  const condition = createNode('branch', pogState);
   thenPrevIds.push([condition, {}, true]);
   elsePrevIds.push([condition, {}, false]);
-  connect(condition.id);
+  connect(condition.id, pogState);
   return [thenPrevIds, elsePrevIds];
 }
-
-function addBranch(node: ESTree.Node): [PrevId[], PrevId[]] {
-  visit(node);
+function addBranch(
+  node: ESTree.Node,
+  pogState: POGState
+): [PrevId[], PrevId[]] {
+  visit(node, pogState);
   const truthy: PrevId[] = [];
   const falsy: PrevId[] = [];
   const top: PrevId[] = [];
@@ -516,89 +161,25 @@ function addBranch(node: ESTree.Node): [PrevId[], PrevId[]] {
   const shouldCreateBranch = pos.length > 0 || neg.length > 0 || top.length > 0;
   const env = merge(pogState.prevIds);
   if (!BRANCH_BYPASSING) {
-    const [thenprev, elseprev] = addemptyBranch();
+    const [thenprev, elseprev] = addemptyBranch(pogState);
     return neg.length > pos.length && BRANCH_FLIPPING
       ? [elseprev, thenprev]
       : [thenprev, elseprev];
   }
 
   if (shouldCreateBranch) {
-    const condition = createNode('branch');
+    const condition = createNode('branch', pogState);
     thenPrevIds.push([condition, { ...env }, true]);
     elsePrevIds.push([condition, { ...env }, false]);
     pogState.prevIds = [...pos, ...neg, ...top];
-    connect(condition.id);
+    connect(condition.id, pogState);
   }
 
   return neg.length > pos.length && BRANCH_FLIPPING
     ? [elsePrevIds.concat(truthy), thenPrevIds.concat(falsy)]
     : [thenPrevIds.concat(truthy), elsePrevIds.concat(falsy)];
 }
-
-function loopVisitor(node: ESTree.Node) {
-  pogState.loopStack.push({ break: [], continue: [] });
-  visit(node);
-  const loop = pogState.loopStack.pop();
-  if (!loop) throw new Error('Loop stack is empty');
-  return loop;
-}
-function endLoop(
-  loop: { break: PrevId[]; continue: PrevId[] },
-  id: number,
-  prevIds: PrevId[]
-) {
-  pogState.prevIds = loop.continue.concat(pogState.prevIds);
-  connect(id);
-  pogState.prevIds = loop.break.concat(prevIds);
-}
-
-function connect(to: number) {
-  pogState.prevIds.forEach((from) => connectPair(from, to));
-}
-function connectPair(from: PrevId, to: number) {
-  const [node, env, context] = from;
-  switch (node.type) {
-    case 'branch':
-      if (node.then && node.else) throw new Error('Condition has 2 branches');
-      if (context) {
-        node.then = to;
-      } else {
-        node.else = to;
-      }
-      break;
-    case 'block':
-      if (node.next) throw new Error('Node has already been connected');
-      node.next = to;
-      break;
-    case 'start':
-      if (node.next) throw new Error('Start Node has already been connected');
-      node.next = to;
-      break;
-  }
-}
-
-function is_typeof(node: ESTree.ConditionalExpression): boolean {
-  return (
-    node.consequent.type === 'Literal' &&
-    node.consequent.value === 'undefined' &&
-    node.test.type === 'BinaryExpression' &&
-    node.test.operator === '===' &&
-    node.test.left.type === 'UnaryExpression' &&
-    node.test.left.operator === 'void' &&
-    node.test.left.argument.type === 'Literal' &&
-    node.test.left.argument.value === 0 &&
-    IGNORE_TYPEOF
-  );
-}
-
-function addLoop() {
-  const node = createNode('block', true);
-  connect(node.id);
-  pogState.prevIds = [[node, {}]];
-  return node;
-}
-
-function addOp(operator: Op) {
+function addOp(operator: Op, pogState: POGState) {
   if (PATH_CLONING) {
     pogState.prevIds.forEach((from) => {
       if (from[0].type === 'block') {
@@ -606,8 +187,8 @@ function addOp(operator: Op) {
         else from[0].op = [operator];
         pogState.nodes.set(from[0].id, from[0]);
       } else {
-        const node = createNode('block', false, operator);
-        connectPair(from, node.id);
+        const node = createNode('block', pogState, false, operator);
+        connectPair(from, node.id, pogState);
         from[0] = node;
         from[1] = {};
         from[2] = undefined;
@@ -623,43 +204,461 @@ function addOp(operator: Op) {
         return;
       }
     }
-    const node = createNode('block', false, operator);
-    connect(node.id);
+    const node = createNode('block', pogState, false, operator);
+    connect(node.id, pogState);
     pogState.prevIds = [[node, {}]];
   }
 }
-
-function createNode(
-  type: 'branch' | 'block',
-  loop?: boolean,
-  value?: Op
-): POGNode {
-  const id = pogState.currentId++;
-  const node: POGNode =
-    type === 'branch'
-      ? { id, type, then: undefined, else: undefined }
-      : {
-          id,
-          type,
-          next: undefined,
-          loop: loop ?? false,
-          op: value ? [value] : undefined,
-        };
-  pogState.nodes.set(id, node);
+function addLoop(pogState: POGState) {
+  const node = createNode('block', pogState, true, undefined);
+  connect(node.id, pogState);
+  pogState.prevIds = [[node, {}]];
   return node;
 }
+function loopVisitor(node: ESTree.Node, pogState: POGState) {
+  pogState.loopStack.push({ break: [], continue: [] });
+  visit(node, pogState);
+  const loop = pogState.loopStack.pop();
+  if (!loop) throw new Error('Loop stack is empty');
+  return loop;
+}
+function endLoop(
+  loop: { break: PrevId[]; continue: PrevId[] },
+  id: number,
+  prevIds: PrevId[],
+  pogState: POGState
+) {
+  pogState.prevIds = loop.continue.concat(pogState.prevIds);
+  connect(id, pogState);
+  pogState.prevIds = loop.break.concat(prevIds);
+}
 
-function pog(
-  functions: Function[],
-  options?: [boolean, boolean, boolean]
-): POG[] {
+function merge(prevIds: PrevId[]): Env {
+  const envs = prevIds.map(([, env]) => env);
+  return envs.reduce(join, {});
+}
+function join(left: Env, right: Env): Env {
+  const result: Env = {};
+  for (const key in left) {
+    const leftValue = left[key];
+    const rightValue = right[key];
+    if (leftValue === rightValue) {
+      result[key] = leftValue;
+    } else if (leftValue === 'bottom') {
+      result[key] = rightValue;
+    } else if (rightValue === 'bottom') {
+      result[key] = leftValue;
+    } else {
+      delete result[key];
+    }
+  }
+  return result;
+}
+
+function visit(node: ESTree.Node, pogState: POGState): void {
+  walk(node, {
+    enter(child: any) {
+      switch (child.type) {
+        case 'BreakStatement':
+          const loop_break = pogState.loopStack.pop();
+          if (!loop_break) return;
+          loop_break.break.push(...pogState.prevIds);
+          pogState.loopStack.push(loop_break);
+          pogState.prevIds = [];
+          return;
+        case 'ContinueStatement':
+          const loop_continue = pogState.loopStack.pop();
+          if (!loop_continue) return;
+          loop_continue.continue.push(...pogState.prevIds);
+          pogState.loopStack.push(loop_continue);
+          pogState.prevIds = [];
+          return;
+        case 'IfStatement': {
+          this.skip();
+          const [thenPrevIds, elsePrevIds] = addBranch(child.test, pogState);
+          pogState.prevIds = thenPrevIds;
+          visit(child.consequent, pogState);
+          const thenPrev = [...pogState.prevIds];
+          pogState.prevIds = elsePrevIds;
+          child.alternate && visit(child.alternate, pogState);
+          pogState.prevIds = thenPrev.concat(pogState.prevIds);
+          return;
+        }
+        case 'ThrowStatement':
+          this.skip();
+          visit(child.argument, pogState);
+          connect(pogState.exceptionId, pogState);
+          pogState.prevIds = [];
+          return;
+        case 'WhileStatement': {
+          this.skip();
+          const whileLoop = addLoop(pogState);
+          const [thenPrevIds, elsePrevIds] = addBranch(child.test, pogState);
+          pogState.prevIds = thenPrevIds;
+          const whileLoopstack = loopVisitor(child.body, pogState);
+          endLoop(whileLoopstack, whileLoop.id, elsePrevIds, pogState);
+          return;
+        }
+        case 'DoWhileStatement': {
+          this.skip();
+          const doWhileLoop = addLoop(pogState);
+          const doWhileLoopstack = loopVisitor(child.body, pogState);
+          const [thenPrevIds, elsePrevIds] = addBranch(child.test, pogState);
+          pogState.prevIds = thenPrevIds;
+          endLoop(doWhileLoopstack, doWhileLoop.id, elsePrevIds, pogState);
+          return;
+        }
+        case 'ForStatement': {
+          this.skip();
+          child.init && visit(child.init, pogState);
+          const forLoop = addLoop(pogState);
+          if (child.test) {
+            const [thenPrevIds, elsePrevIds] = addBranch(child.test, pogState);
+            pogState.prevIds = thenPrevIds;
+            const forLoopstack = loopVisitor(child.body, pogState);
+            child.update && visit(child.update, pogState);
+            endLoop(forLoopstack, forLoop.id, elsePrevIds, pogState);
+          } else {
+            const forLoopstack = loopVisitor(child.body, pogState);
+            endLoop(forLoopstack, forLoop.id, [], pogState);
+          }
+          return;
+        }
+        case 'ForInStatement':
+        case 'ForOfStatement':
+          this.skip();
+          visit(child.left, pogState);
+          child.right && visit(child.right, pogState);
+          const forInLoop = addLoop(pogState);
+          const [thenPrevIds, elsePrevIds] = addemptyBranch(pogState);
+          pogState.prevIds = thenPrevIds;
+          const forInLoopstack = loopVisitor(child.body, pogState);
+          endLoop(forInLoopstack, forInLoop.id, elsePrevIds, pogState);
+          return;
+        case 'SwitchStatement':
+          this.skip();
+          pogState.loopStack.push({ break: [], continue: [] });
+          visit(child.discriminant, pogState);
+          child.cases.forEach((c: ESTree.SwitchCase) => {
+            c.test && visit(c.test, pogState);
+            const [thenPrevIds, elsePrevIds] = addemptyBranch(pogState);
+            pogState.prevIds = thenPrevIds;
+            c.consequent.forEach((node) => visit(node, pogState));
+            pogState.prevIds = elsePrevIds.concat(pogState.prevIds);
+          });
+          const switchcase = pogState.loopStack.pop();
+          if (!switchcase) throw new Error('Loop stack is empty');
+          pogState.prevIds = switchcase.break.concat(pogState.prevIds);
+          return;
+        case 'VariableDeclaration':
+          this.skip();
+          child.declarations.forEach((decl: ESTree.VariableDeclarator) => {
+            if (!decl.init) return;
+            visit(decl.init, pogState);
+            if (decl.id.type === 'Identifier') {
+              const name = decl.id.name;
+              pogState.prevIds.forEach(([node, env, context]) => {
+                env[name] = env[RESULT];
+              });
+            }
+          });
+          return;
+        case 'Identifier':
+          const name = child.name;
+          pogState.prevIds.forEach(([node, env, context]) => {
+            env[RESULT] = env[name] ?? 'pos';
+          });
+          return;
+        case 'Literal': {
+          const v = child.value;
+          const isFalsy =
+            v === null || v === 0 || v === false || v === '' || v === 0n;
+          pogState.prevIds.forEach(([_, env]: any) => {
+            env[RESULT] = isFalsy ? 'falsy' : 'truthy';
+          });
+          return;
+        }
+        case 'ObjectExpression':
+          this.skip();
+          const properties = child.properties
+            .filter((p: any) => p.type === 'Property')
+            .filter(
+              (p: any) =>
+                ![
+                  'AssignmentPattern',
+                  'ObjectPattern',
+                  'ArrayPattern',
+                ].includes(p.value.type)
+            );
+          properties.forEach((prop: any) => {
+            visit(prop.key, pogState);
+            visit(prop.value, pogState);
+
+            const key =
+              prop.key.type === 'Identifier'
+                ? prop.key.name
+                : prop.key.type === 'Literal' &&
+                    typeof prop.key.value === 'string'
+                  ? prop.key.value
+                  : '[]';
+
+            addOp({ type: 'property-update', value: key }, pogState);
+          });
+
+          pogState.prevIds.forEach(([_, env]: any) => {
+            env[RESULT] = 'truthy';
+          });
+          return;
+        case 'UnaryExpression':
+          this.skip();
+          if (child.operator === '!') {
+            visit(child.argument, pogState);
+            pogState.prevIds.forEach(([node, env, context]) => {
+              switch (env[RESULT]) {
+                case 'truthy':
+                  env[RESULT] = 'falsy';
+                  break;
+                case 'falsy':
+                  env[RESULT] = 'truthy';
+                  break;
+                case 'pos':
+                  env[RESULT] = 'neg';
+                  break;
+                case 'neg':
+                  env[RESULT] = 'pos';
+                  break;
+                case 'bottom':
+                  env[RESULT] = 'bottom';
+                  break;
+              }
+            });
+          } else {
+            visit(child.argument, pogState);
+            pogState.prevIds.forEach(([node, env, context]) => {
+              env[RESULT] = 'pos';
+            });
+          }
+          return;
+        case 'UpdateExpression':
+          this.skip();
+          visit(child.argument, pogState);
+          if (child.argument.type === 'MemberExpression') {
+            visit(child.argument.object, pogState);
+            visit(child.argument.property, pogState);
+            const value =
+              !child.argument.computed &&
+              child.argument.property.type === 'Identifier'
+                ? child.argument.property.name
+                : child.argument.computed &&
+                    child.argument.property.type === 'Literal' &&
+                    typeof child.argument.property.value === 'string'
+                  ? child.argument.property.value
+                  : '[]';
+            addOp(
+              {
+                type: 'property-update',
+                value,
+              },
+              pogState
+            );
+          }
+          pogState.prevIds.forEach(([node, env, context]) => {
+            env[RESULT] = 'pos';
+          });
+          return;
+        case 'AssignmentExpression':
+          this.skip();
+          if (child.left.type === 'MemberExpression') {
+            visit(child.left.object, pogState);
+            visit(child.left.property, pogState);
+            visit(child.right, pogState);
+            const value =
+              !child.left.computed && child.left.property.type === 'Identifier'
+                ? child.left.property.name
+                : child.left.computed &&
+                    child.left.property.type === 'Literal' &&
+                    typeof child.left.property.value === 'string'
+                  ? child.left.property.value
+                  : '[]';
+            addOp(
+              {
+                type: 'property-update',
+                value,
+              },
+              pogState
+            );
+            pogState.prevIds.forEach(([node, env, context]) => {
+              env[RESULT] = 'pos';
+            });
+            return;
+          }
+          if (child.left.type === 'Identifier') {
+            visit(child.right, pogState);
+            const name = child.left.name;
+            pogState.prevIds.forEach(([node, env, context]) => {
+              env[name] = env[RESULT];
+              env[RESULT] = 'pos';
+            });
+            return;
+          }
+          return;
+        case 'LogicalExpression': {
+          this.skip();
+          if (child.operator === '&&') {
+            const [thenPrevIds, elsePrevIds] = addBranch(child.left, pogState);
+            pogState.prevIds = thenPrevIds;
+            visit(child.right, pogState);
+            elsePrevIds.forEach(
+              ([node, env, context]) => (env[RESULT] = 'falsy')
+            );
+            pogState.prevIds = pogState.prevIds.concat(elsePrevIds);
+            return;
+          } else if (child.operator === '||') {
+            const [thenPrevIds, elsePrevIds] = addBranch(child.left, pogState);
+            pogState.prevIds = elsePrevIds;
+            visit(child.right, pogState);
+            thenPrevIds.forEach(
+              ([node, env, context]) => (env[RESULT] = 'truthy')
+            );
+            pogState.prevIds = pogState.prevIds.concat(thenPrevIds);
+            return;
+          } else {
+            visit(child.left, pogState);
+            const [thenPrevIds, elsePrevIds] = addemptyBranch(pogState);
+            pogState.prevIds = thenPrevIds;
+            visit(child.right, pogState);
+            elsePrevIds.forEach(
+              ([node, env, context]) => (env[RESULT] = 'falsy')
+            );
+            pogState.prevIds = pogState.prevIds.concat(elsePrevIds);
+          }
+          return;
+        }
+        case 'MemberExpression':
+          this.skip();
+          if (
+            child.object.type === 'Identifier' &&
+            SKIP_BUILTIN.includes(child.object.name)
+          ) {
+            visit(child.property, pogState);
+            pogState.prevIds.forEach(([node, env, context]) => {
+              env[RESULT] = 'pos';
+            });
+            return;
+          }
+          visit(child.object, pogState);
+          visit(child.property, pogState);
+          const value =
+            !child.computed && child.property.type === 'Identifier'
+              ? child.property.name
+              : child.computed &&
+                  child.property.type === 'Literal' &&
+                  typeof child.property.value === 'string'
+                ? child.property.value
+                : '[]';
+          addOp(
+            {
+              type: 'property',
+              value,
+            },
+            pogState
+          );
+          pogState.prevIds.forEach(([node, env, context]) => {
+            env[RESULT] = 'pos';
+          });
+          return;
+        case 'ConditionalExpression': {
+          this.skip();
+          if (is_typeof(child)) {
+            pogState.prevIds.forEach(([node, env, context]) => {
+              env[RESULT] = 'pos';
+            });
+            return;
+          }
+          const [thenPrevIds, elsePrevIds] = addBranch(child.test, pogState);
+          pogState.prevIds = thenPrevIds;
+          visit(child.consequent, pogState);
+          const thenPrev = [...pogState.prevIds];
+          pogState.prevIds = elsePrevIds;
+          visit(child.alternate, pogState);
+          pogState.prevIds = thenPrev.concat(pogState.prevIds);
+          return;
+        }
+        case 'CallExpression':
+        case 'NewExpression':
+          this.skip();
+          visit(child.callee, pogState);
+          child.arguments.forEach((arg: ESTree.Node) => visit(arg, pogState));
+          pogState.prevIds.forEach((prevId) => {
+            prevId[1] = {};
+            prevId[1][RESULT] = 'pos';
+          });
+          return;
+        default:
+          return;
+      }
+    },
+    leave(child: any) {
+      switch (child.type) {
+        case 'ReturnStatement':
+          connect_end(pogState);
+          return;
+        case 'ArrayExpression':
+          pogState.prevIds.forEach(([_, env]: any) => {
+            env[RESULT] = 'pos';
+          });
+          return;
+        case 'BinaryExpression':
+          if (
+            child.operator === '!==' ||
+            child.operator === '!=' ||
+            child.operator === '>=' ||
+            child.operator === '<='
+          ) {
+            pogState.prevIds.forEach(([node, env, context]) => {
+              env[RESULT] = 'neg';
+            });
+          } else
+            pogState.prevIds.forEach(([node, env, context]) => {
+              env[RESULT] = 'pos';
+            });
+          return;
+        default:
+          if (isExpression(child)) {
+            pogState.prevIds.forEach(([_, env]: any) => {
+              env[RESULT] = 'pos';
+            });
+          }
+          return;
+      }
+    },
+  });
+}
+
+export function extractPOG(node: ESTree.Node): POGState {
+  const start: POGNode = { id: 0, type: 'start' };
+  const pogState: POGState = {
+    currentId: 1,
+    prevIds: [[start, {}]],
+    nodes: new Map<number, POGNode>([
+      [0, start],
+      [-1, { type: 'exit', id: -1 }],
+      [-2, { type: 'exception-exit', id: -2 }],
+    ]),
+    loopStack: [],
+    endId: -1,
+    exceptionId: -2,
+  };
+  visit(node, pogState);
+  connect_end(pogState);
+  return pogState;
+}
+
+function pog(functions: Function[]): POG[] {
   return functions.map((func) => {
-    const ast = func.body;
-    const graph = extractPOG(ast, options);
+    const graph = extractPOG(func.body);
 
     return {
-      id: func.id,
-      body: func.body,
       graph: graph.nodes,
     };
   });

@@ -1,185 +1,213 @@
-import fs from "fs";
-import path from "path";
+import fs from 'fs';
+import path from 'path';
+import { EvalOptions, LibData, HashData, Score } from './types/types';
+const blacklistDir = path.join(__dirname, './data');
 
-interface Score {
-  libName: string;
-  topVersions: string[];
-  topScore: number;
-  topScoreStr: string;
-  type3Versions: string[];
-  type2Versions: string[];
-}
-
-const WEB_BLACKLIST_THRESHOLD = 0.6;
-const DUP_THRESHOLD = 0.3;
-const MIN_FUNCTION_COUNT = 5;
-
-const blacklistcache: Record<string, Record<string, string[]>> = {};
-const intraduphashCache: Record<
-  string,
-  Record<string, Record<string, Record<string, [number, number][]>>>
-> = {};
-const intraduplibCache: Record<
-  string,
-  Record<string, Record<string, number>>
-> = {};
-
-export const evaluate = (
-  uniqueHashes: Record<string, string[]>,
-  options: { threshold: number },
-  method: string = "",
-  url: string = ""
-): Score[] => {
-  const allWebHashes: Record<string, Record<string, string[]>> = {};
-
-  const libInfos: Record<
-    string,
-    { id: number; versions: string[]; hashCnt: number[] }
-  > = JSON.parse(
-    fs.readFileSync(
-      path.join(__dirname, `./data/debun-hashes/all-libs${method}.json`),
-      "utf-8"
-    )
+const loadData = () => {
+  const libInfos: LibData = JSON.parse(
+    fs.readFileSync(path.join(__dirname, `./data/all-libs.json`), 'utf-8')
   );
 
-  const libHashes: Record<
-    string,
-    Record<string, Record<string, [number, number][]>>
-  > = JSON.parse(
-    fs.readFileSync(
-      path.join(__dirname, `./data/debun-hashes/all-hash${method}.json`),
-      "utf-8"
-    )
+  const libHashes: HashData = JSON.parse(
+    fs.readFileSync(path.join(__dirname, `./data/all-hash.json`), 'utf-8')
   );
-
-  if (Object.keys(uniqueHashes).length === 0) {
-    uniqueHashes = allWebHashes[url];
-  }
-  const blacklist = (blacklistcache[WEB_BLACKLIST_THRESHOLD] = JSON.parse(
-    fs.readFileSync(
-      path.join(
-        __dirname,
-        `./data/debun-hashes/blacklist-${WEB_BLACKLIST_THRESHOLD}${method}.json`
-      ),
-      "utf-8"
-    )
-  ));
-
   const intraDupHashes: Record<
     string,
     Record<string, Record<string, [number, number][]>>
-  > = (intraduphashCache[`${DUP_THRESHOLD}`] = JSON.parse(
+  > = JSON.parse(
     fs.readFileSync(
-      path.join(
-        __dirname,
-        `./data/debun-hashes/dups-${DUP_THRESHOLD}-hash${method}.json`
-      ),
-      "utf-8"
+      path.join(__dirname, `./data/intra-dups-hash.json`),
+      'utf-8'
     )
-  ));
+  );
 
-  const intraDupLibs: Record<
-    string,
-    Record<string, number>
-  > = (intraduplibCache[`${DUP_THRESHOLD}`] = JSON.parse(
+  const intraDupLibs: Record<string, Record<string, number>> = JSON.parse(
     fs.readFileSync(
-      path.join(
-        __dirname,
-        `./data/debun-hashes/dups-${DUP_THRESHOLD}-libs${method}.json`
-      ),
-      "utf-8"
+      path.join(__dirname, `./data/intra-dups-libs.json`),
+      'utf-8'
     )
-  ));
+  );
 
-  let totalMatches: Record<string, Record<number, number>> = {};
-  let type3Matches: Record<string, Record<number, number>> = {};
-  let type2Matches: Record<string, Record<number, number>> = {};
-  if (!uniqueHashes) return [];
+  const rawBlacklist: Record<string, string[]> = JSON.parse(
+    fs.readFileSync(path.join(blacklistDir, `blacklist.json`), 'utf-8')
+  );
 
-  Object.entries(uniqueHashes).forEach(([nodes, hashes]) => {
-    hashes.forEach((hash) => {
-      if (!libHashes[nodes]?.[hash]) return;
-      if (blacklist[nodes]?.includes(hash)) return;
-      const matches = libHashes[nodes][hash];
+  const blacklist: Record<string, Set<string>> = {};
+  for (const [nodes, hashes] of Object.entries(rawBlacklist)) {
+    blacklist[nodes] = new Set(hashes);
+  }
+
+  return {
+    libInfos,
+    libHashes,
+    intraDupHashes,
+    intraDupLibs,
+    blacklist,
+  };
+};
+
+const { libInfos, libHashes, intraDupHashes, intraDupLibs, blacklist } =
+  loadData();
+
+const determineType = (matches: Record<string, [number, number][]>): number => {
+  const keys = Object.keys(matches);
+  if (keys.length !== 1) return 1;
+
+  const ranges = matches[keys[0]];
+  if (ranges.length !== 1) return 2;
+
+  const [vFrom, vTo] = ranges[0];
+  return vFrom === vTo ? 3 : 2;
+};
+
+const rangeIncludes = (ranges: [number, number][], value: number): boolean => {
+  for (const [start, end] of ranges) {
+    if (value >= start && value <= end) return true;
+  }
+  return false;
+};
+
+const computeMatches = (
+  webHashes: Record<number, string[]>
+): {
+  totalMatches: Map<number, Map<number, number>>;
+  type3Matches: Map<number, Map<number, number>>;
+  type2Matches: Map<number, Map<number, number>>;
+} => {
+  const totalMatches = new Map<number, Map<number, number>>();
+  const type3Matches = new Map<number, Map<number, number>>();
+  const type2Matches = new Map<number, Map<number, number>>();
+
+  const entries = Object.entries(webHashes);
+  for (let i = 0; i < entries.length; i++) {
+    const [nodes, hashes] = entries[i];
+    const nodeHashes = libHashes[nodes];
+    if (!nodeHashes) continue;
+
+    const nodeBlacklist = blacklist[nodes];
+
+    for (let j = 0; j < hashes.length; j++) {
+      const hash = hashes[j];
+      if (nodeBlacklist?.has(hash)) continue;
+
+      const matches = nodeHashes[hash];
+      if (!matches) continue;
+
       const matchType = determineType(matches);
-      Object.entries(matches).forEach(([lIdx, vIdxes]) => {
-        if (totalMatches[lIdx] === undefined) totalMatches[lIdx] = {};
-        vIdxes.forEach(([start, end]) => {
+
+      const matchEntries = Object.entries(matches);
+      for (let k = 0; k < matchEntries.length; k++) {
+        const [lIdxStr, vIdxes] = matchEntries[k];
+        const lIdx = parseInt(lIdxStr, 10);
+
+        let libTotal = totalMatches.get(lIdx);
+        if (!libTotal) {
+          libTotal = new Map();
+          totalMatches.set(lIdx, libTotal);
+        }
+
+        let libType3: Map<number, number> | undefined;
+        let libType2: Map<number, number> | undefined;
+
+        if (matchType === 3) {
+          libType3 = type3Matches.get(lIdx);
+          if (!libType3) {
+            libType3 = new Map();
+            type3Matches.set(lIdx, libType3);
+          }
+        } else if (matchType === 2) {
+          libType2 = type2Matches.get(lIdx);
+          if (!libType2) {
+            libType2 = new Map();
+            type2Matches.set(lIdx, libType2);
+          }
+        }
+
+        for (let m = 0; m < vIdxes.length; m++) {
+          const [start, end] = vIdxes[m];
           for (let vIdx = start; vIdx <= end; vIdx++) {
             if (intraDupHashes[nodes]?.[hash]?.[lIdx]) {
               const ranges = intraDupHashes[nodes][hash][lIdx];
-              if (rangeIncludes(ranges, vIdx)) return;
+              if (rangeIncludes(ranges, vIdx)) break;
             }
-            if (!totalMatches[lIdx][vIdx]) totalMatches[lIdx][vIdx] = 0;
-            totalMatches[lIdx][vIdx]++;
+            libTotal.set(vIdx, (libTotal.get(vIdx) || 0) + 1);
+
             if (matchType === 3) {
-              if (!type3Matches[lIdx]) type3Matches[lIdx] = {};
-              if (!type3Matches[lIdx][vIdx]) type3Matches[lIdx][vIdx] = 0;
-              type3Matches[lIdx][vIdx]++;
-            }
-            if (matchType === 2) {
-              if (!type2Matches[lIdx]) type2Matches[lIdx] = {};
-              if (!type2Matches[lIdx][vIdx]) type2Matches[lIdx][vIdx] = 0;
-              type2Matches[lIdx][vIdx]++;
+              libType3!.set(vIdx, (libType3!.get(vIdx) || 0) + 1);
+            } else if (matchType === 2) {
+              libType2!.set(vIdx, (libType2!.get(vIdx) || 0) + 1);
             }
           }
-        });
-      });
-    });
-  });
+        }
+      }
+    }
+  }
 
+  return { totalMatches, type3Matches, type2Matches };
+};
+
+const computeScores = (
+  totalMatches: Map<number, Map<number, number>>,
+  type3Matches: Map<number, Map<number, number>>,
+  type2Matches: Map<number, Map<number, number>>,
+  options: EvalOptions
+): Score[] => {
   const scores: Score[] = [];
 
-  Object.entries(totalMatches).forEach(([lIdx, matches]) => {
-    const lib = Object.entries(libInfos).find(
-      ([_, libInfo]) => libInfo.id.toString() === lIdx
-    );
+  totalMatches.forEach((matches, lIdx) => {
+    const lib = libInfos[lIdx];
     if (!lib) return;
 
-    let type3Versions: string[] = [];
-    let type2Versions: string[] = [];
+    const type3Versions: string[] = [];
+    const type2Versions: string[] = [];
     let topType2VersionCount = 0;
     let topScore = 0;
-    let topScoreStr = "";
-    let topVersions: string[] = [];
+    let topScoreStr = '';
+    const topVersions: string[] = [];
 
-    Object.entries(matches).forEach(([vIdx, score]) => {
-      if (score < MIN_FUNCTION_COUNT) return;
+    const libType3 = type3Matches.get(lIdx);
+    const libType2 = type2Matches.get(lIdx);
 
-      const percentage =
-        score /
-        (lib[1].hashCnt[parseFloat(vIdx)] - (intraDupLibs[lIdx]?.[vIdx] ?? 0));
-      const type3Count = type3Matches[lIdx]?.[parseFloat(vIdx)] || 0;
-      const type2Count = type2Matches[lIdx]?.[parseFloat(vIdx)] || 0;
+    matches.forEach((score, vIdx) => {
+      if (score < options.MIN_FUNCTION_COUNT) return;
 
-      if (!(percentage > options.threshold)) return;
-      const currentVersionStr = lib[1].versions[parseFloat(vIdx)];
+      const hashCnt = lib.hashCnt[vIdx];
+      const percentage = score / (hashCnt - (intraDupLibs[lIdx]?.[vIdx] ?? 0));
+
+      if (percentage <= options.SCORE_THRESHOLD) return;
+
+      const type3Count = libType3?.get(vIdx) || 0;
+      const type2Count = libType2?.get(vIdx) || 0;
+      const currentVersionStr = lib.versions[vIdx];
+
       if (type3Count > 0) {
         type3Versions.push(currentVersionStr);
       }
+
       if (type2Count > 3) {
         if (type2Count > topType2VersionCount) {
           topType2VersionCount = type2Count;
-          type2Versions = [];
+          type2Versions.length = 0;
         }
         if (type2Count === topType2VersionCount) {
           type2Versions.push(currentVersionStr);
         }
       }
+
       if (percentage > topScore) {
         topScore = percentage;
-        topScoreStr = `${score}/${lib[1].hashCnt[parseFloat(vIdx)]}`;
-        topVersions = [currentVersionStr];
+        topScoreStr = `${score}/${hashCnt}`;
+        topVersions.length = 0;
+        topVersions.push(currentVersionStr);
       } else if (percentage === topScore) {
         topVersions.push(currentVersionStr);
       }
     });
+
     if (topScore > 0 && topVersions.length > 0) {
       scores.push({
-        libName: lib[0],
+        libName: lib.name,
         topVersions,
-        topScore,
-        topScoreStr,
         type2Versions,
         type3Versions,
       });
@@ -189,21 +217,10 @@ export const evaluate = (
   return scores;
 };
 
-const determineType = (matches: Record<string, [number, number][]>) => {
-  if (Object.keys(matches).length === 1) {
-    // type 2: only one library!
-    if (Object.values(matches)[0].length === 1) {
-      const [[[vFrom, vTo]]] = Object.values(matches);
-      if (vFrom === vTo) return 3; // type 3: only one version!
-    }
-    return 2;
-  }
-  return 1; // type 1: others..
-};
-
-const rangeIncludes = (ranges: [number, number][], value: number): boolean => {
-  for (const [start, end] of ranges) {
-    if (value >= start && value <= end) return true;
-  }
-  return false;
+export const evaluate = (
+  hashes: Record<number, string[]>,
+  options: EvalOptions
+): Score[] => {
+  const { totalMatches, type3Matches, type2Matches } = computeMatches(hashes);
+  return computeScores(totalMatches, type3Matches, type2Matches, options);
 };

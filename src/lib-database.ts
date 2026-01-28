@@ -1,26 +1,22 @@
-import escodegen from "escodegen";
-import fs, { readFileSync } from "fs";
-import path, { join } from "path";
-import semverSort from "semver/functions/sort";
-import semverValid from "semver/functions/valid";
-import fingerprintCollector from "./fingerprint-collector";
-import { POGHash } from "./types/pog";
+import fs, { readFileSync } from 'fs';
+import { join } from 'path';
+import semverSort from 'semver/functions/sort';
+import semverValid from 'semver/functions/valid';
+import fg from 'fast-glob';
 
-// Types
-type HashData = Record<
-  string,
-  Record<string, Record<number, Array<[number, number]>>>
->;
-type LibData = Record<
-  string,
-  { id: number; versions: string[]; hashCnt: number[] }
->;
+import fingerprintCollector from './fingerprint-collector/index';
+import { POGHash, LibData, HashData } from './types/types';
 
 const rootDir = process.cwd();
+const hashFilename = join(rootDir, `../data/all-hash.json`);
+const libFilename = join(rootDir, `../data/all-libs.json`);
+const outputDir = join(rootDir, '../data');
+fs.mkdirSync(outputDir, { recursive: true });
+const npmDataDirPath = join(rootDir, '../../../misc/crawlers/npm/output');
 
 const parseVersionString = (version: string) => {
-  const [major, minor, patch = "0"] = version.split(".");
-  const [patchVersion, patchSuffix = "0"] = patch.split("-");
+  const [major, minor, patch = '0'] = version.split('.');
+  const [patchVersion, patchSuffix = '0'] = patch.split('-');
   return [
     parseInt(major),
     parseInt(minor),
@@ -29,102 +25,67 @@ const parseVersionString = (version: string) => {
   ];
 };
 
-const countLines = (code: string) => code.split("\n").length;
-
-const hashFilename = join(rootDir, `./data/all-hash.json`);
-const libFilename = join(rootDir, `./data/all-libs.json`);
-const outputDir = join(rootDir, "./data");
-fs.mkdirSync(outputDir, { recursive: true });
-
-const cdnDataDirPath = join(rootDir, "./data/cdn");
-
-/**
- * Checks if a version string follows semantic versioning without suffix
- * @param version - The version string to check
- * @returns Array of version numbers or false if invalid
- */
-/**
- * Recursively gets all files from a directory
- * @param dirPath - Directory path to scan
- * @param basePath - Base path for generating relative paths
- * @returns Array of relative file paths
- */
-function getAllFiles(dirPath: string, basePath: string = dirPath): string[] {
-  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-
-  let result: string[] = [];
-  for (const entry of entries) {
-    const fullPath = path.join(dirPath, entry.name);
-    const relativePath = path.relative(basePath, fullPath);
-
-    if (entry.isFile()) {
-      result.push(relativePath);
-    } else if (entry.isDirectory()) {
-      result = result.concat(getAllFiles(fullPath, basePath));
-    }
-  }
-
-  return result;
-}
-
 function isJS(files: string[]): string[] {
   return files.filter(
     (file) =>
-      file.endsWith("js") || file.endsWith("mjs") || file.endsWith("cjs")
+      file.endsWith('js') || file.endsWith('mjs') || file.endsWith('cjs')
   );
 }
 
-/**
- * Main function to process libraries and generate hash data
- */
 (async () => {
   const start = Date.now();
   let allLibs: LibData = {};
   let allHashes: HashData = {};
   try {
-    let libIdx = 0;
-
-    const libNames = fs.readdirSync(cdnDataDirPath);
+    let libId = 0;
+    const libNames = fs.readdirSync(npmDataDirPath);
+    const totalLibs = libNames.length;
 
     for (const libName of libNames) {
-      console.log("processing", libName);
-      allLibs[libName] = { id: libIdx, versions: [], hashCnt: [] };
-      const versions = fs.readdirSync(join(cdnDataDirPath, libName));
-      let versionIdx = 0;
-      const v = versions.filter(
+      let hashes: POGHash[] = [];
+      console.log(`[${libId + 1}/${totalLibs}] processing ${libName}`);
+      const libStart = Date.now();
+
+      const versions = fs.readdirSync(join(npmDataDirPath, libName));
+      const validVersions = versions.filter(
         (version) =>
-          semverValid(version) && parseVersionString(version)[3] === "0"
+          semverValid(version) && parseVersionString(version)[3] === '0'
       );
-      for (const version of semverSort(v)) {
-        const hashes: POGHash[] = [];
-        const files = getAllFiles(join(cdnDataDirPath, libName, version));
-        for (const file of isJS(files)) {
+      const sortedVersions = semverSort(validVersions);
+
+      let versionIdx = 0;
+      for (const version of sortedVersions) {
+        hashes = [];
+        console.log(
+          `[${versionIdx + 1}/${sortedVersions.length}] ${version} processing...`
+        );
+        const versionPath = join(npmDataDirPath, libName, version);
+        const preferredDirs = ['src', 'lib', 'source', 'dist', 'closure', 'js'];
+        const targetDirs = preferredDirs.filter((dir) => {
+          const dirPath = join(versionPath, dir);
+          return fs.existsSync(dirPath) && fs.statSync(dirPath).isDirectory();
+        });
+        const patterns =
+          targetDirs.length > 0
+            ? targetDirs.map((dir) => `${dir}/**/*`)
+            : ['**/*'];
+        const files = await fg(patterns, { cwd: versionPath });
+        const jsFiles = isJS(files);
+
+        for (const file of jsFiles) {
           try {
-            const code = readFileSync(
-              join(cdnDataDirPath, libName, version, file),
-              "utf-8"
-            );
+            const code = readFileSync(join(versionPath, file), 'utf-8');
+
             try {
-              const hash = fingerprintCollector(code);
-              hashes.push(...hash);
-              const filteredHash = hash.filter((h) => {
-                const body = escodegen.generate(h.body);
-                const lines = countLines(body);
-                return lines < 8;
-              });
-              hashes.push(...filteredHash);
+              const newHashes = fingerprintCollector(code);
+              hashes.push(...newHashes);
             } catch (hashError) {
-              console.log(
-                "[Hash error]",
-                (hashError as Error).message,
-                libName,
-                version,
-                file
-              );
+              const errorMsg = (hashError as Error).message;
+              console.log('[Hash error]', errorMsg, libName, version, file);
             }
           } catch (readError) {
             console.log(
-              "[Read error]",
+              '[Read error]',
               (readError as Error).message,
               libName,
               version,
@@ -132,61 +93,55 @@ function isJS(files: string[]): string[] {
             );
           }
         }
+        const uniq = new Map<string, POGHash>();
+        for (const h of hashes) {
+          if (h.nodes > 6) uniq.set(h.hash, h);
+        }
+        const uniqueHashes = [...uniq.values()];
+        allLibs[libId] ??= { name: libName, versions: [], hashCnt: [] };
+        allLibs[libId].versions.push(version);
+        allLibs[libId].hashCnt.push(uniqueHashes.length);
 
-        const uniqueHashes = Array.from(
-          new Map(hashes.map((hash) => [hash.hash, hash])).values()
-        );
+        for (const { hash, nodes } of uniqueHashes) {
+          allHashes[nodes] ??= {};
+          allHashes[nodes][hash] ??= {};
 
-        if (uniqueHashes.length === 0) continue;
+          if (allHashes[nodes][hash][libId]) {
+            const prevHash = allHashes[nodes][hash][libId];
+            const lastRange = prevHash[prevHash.length - 1];
 
-        allLibs[libName].versions.push(version);
-        allLibs[libName].hashCnt.push(uniqueHashes.length);
-
-        uniqueHashes.forEach(({ hash, nodes }) => {
-          if (allHashes[nodes]) {
-            if (allHashes[nodes][hash]) {
-              if (allHashes[nodes][hash][libIdx]) {
-                const prevHash = allHashes[nodes][hash][libIdx];
-                if (prevHash[prevHash.length - 1][1] === versionIdx - 1)
-                  allHashes[nodes][hash][libIdx][prevHash.length - 1][1] =
-                    versionIdx;
-                else
-                  allHashes[nodes][hash][libIdx].push([versionIdx, versionIdx]);
-              } else {
-                allHashes[nodes][hash][libIdx] = [[versionIdx, versionIdx]];
-              }
+            if (lastRange[1] === versionIdx - 1) {
+              lastRange[1] = versionIdx;
             } else {
-              allHashes[nodes][hash] = {
-                [libIdx]: [[versionIdx, versionIdx]],
-              };
+              prevHash.push([versionIdx, versionIdx]);
             }
           } else {
-            allHashes[nodes] = {
-              [hash]: {
-                [libIdx]: [[versionIdx, versionIdx]],
-              },
-            };
+            allHashes[nodes][hash][libId] = [[versionIdx, versionIdx]];
           }
-        });
+        }
         versionIdx++;
       }
-      libIdx++;
+
+      console.log(
+        `  ↳ completed in ${Date.now() - libStart}ms (${sortedVersions.length} versions, ${versionIdx} processed)`
+      );
+      libId++;
     }
   } catch (e) {
-    console.error("error", (e as Error).message);
-    console.log("write", hashFilename, "before I die..");
-    console.log("write", libFilename, "before I die..");
+    console.error('error', (e as Error).message);
+    console.log('write', hashFilename, 'before I die..');
+    console.log('write', libFilename, 'before I die..');
     fs.writeFileSync(
-      hashFilename.split(".")[0] + "error" + ".json",
-      JSON.stringify(allHashes, null, 2)
+      hashFilename.replace('.json', '-error.json'),
+      JSON.stringify(allHashes)
     );
     fs.writeFileSync(
-      libFilename.split(".")[0] + "error" + ".json",
-      JSON.stringify(allLibs, null, 2)
+      libFilename.replace('.json', '-error.json'),
+      JSON.stringify(allLibs)
     );
   }
 
-  console.log("finish", Date.now() - start, "ms");
-  fs.writeFileSync(hashFilename, JSON.stringify(allHashes, null, 2));
-  fs.writeFileSync(libFilename, JSON.stringify(allLibs, null, 2));
+  console.log('finish', Date.now() - start, 'ms');
+  fs.writeFileSync(hashFilename, JSON.stringify(allHashes));
+  fs.writeFileSync(libFilename, JSON.stringify(allLibs));
 })();

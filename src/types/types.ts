@@ -1,18 +1,14 @@
-import { ESTree } from 'meriyah';
+import * as ESTree from 'estree';
 
 export interface Function {
   id?: string;
   body: ESTree.Node;
 }
 export type POGHash = {
-  id?: string;
   nodes: number;
   hash: string;
-  body: ESTree.Node;
 };
 export interface POG {
-  id?: string;
-  body: ESTree.Node;
   graph: Map<number, POGNode>;
 }
 
@@ -61,4 +57,25 @@ export interface POGState {
   loopStack: { break: PrevId[]; continue: PrevId[] }[];
   endId: number;
   exceptionId: number;
+}
+export type HashData = Record<
+  string,
+  Record<string, Record<number, Array<[number, number]>>>
+>;
+export type LibData = Record<
+  number,
+  { name: string; versions: string[]; hashCnt: number[] }
+>;
+
+export interface EvalOptions {
+  SCORE_THRESHOLD: number;
+  MIN_FUNCTION_COUNT: number;
+  WEB_BLACKLIST_THRESHOLD?: number;
+  DUP_THRESHOLD?: number;
+}
+export interface Score {
+  libName: string;
+  topVersions: string[];
+  type3Versions: string[];
+  type2Versions: string[];
 }
