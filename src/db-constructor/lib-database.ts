@@ -22,18 +22,12 @@ const parseVersionString = (version: string) => {
   ];
 };
 
-function isJS(files: string[]): string[] {
-  return files.filter(
-    (file) =>
-      file.endsWith('js') || file.endsWith('mjs') || file.endsWith('cjs')
-  );
-}
-
 export async function buildDatabase(dirPath: string) {
   let allLibs: LibData = {};
   let allHashes: HashData = {};
   let libId = 0;
   const libNames = fs.readdirSync(dirPath);
+
   for (const libName of libNames) {
     let hashes: POGHash[] = [];
 
@@ -55,12 +49,11 @@ export async function buildDatabase(dirPath: string) {
       });
       const patterns =
         targetDirs.length > 0
-          ? targetDirs.map((dir) => `${dir}/**/*`)
-          : ['**/*'];
+          ? targetDirs.map((dir) => `${dir}/**/*.{js,cjs,mjs}`)
+          : ['**/*.{js,cjs,mjs}'];
       const files = await fg(patterns, { cwd: versionPath });
-      const jsFiles = isJS(files);
 
-      for (const file of jsFiles) {
+      for (const file of files) {
         try {
           const code = readFileSync(join(versionPath, file), 'utf-8');
 

@@ -95,14 +95,6 @@ function getPreloadScripts(page) {
         return links.map((link) => link.href);
     });
 }
-function getInlineScripts(page) {
-    return page.evaluate(() => {
-        const scriptElements = Array.from(document.querySelectorAll('script'));
-        return scriptElements
-            .filter((script) => !script.src && script?.textContent?.trim())
-            .map((script) => script.textContent ?? '');
-    });
-}
 function guardFolderSync(dirPath) {
     if (!fs_1.default.existsSync(dirPath))
         fs_1.default.mkdirSync(dirPath, { recursive: true });
@@ -139,16 +131,10 @@ async function downloadScripts(targetUrl, headless = true, rootFolder = 'data/cr
     catch (err) { }
     const preloadScripts = await getPreloadScripts(page);
     preloadScripts.forEach((scriptUrl) => jsFiles.add(scriptUrl));
-    const inlineScripts = await getInlineScripts(page);
     await browser.close();
     const domainFolder = path_1.default.join(__dirname, '../', rootFolder, reachableUrl.host);
     guardFolderSync(domainFolder);
-    inlineScripts.forEach((inlineScript, idx) => {
-        const filepath = path_1.default.join(domainFolder, `browser-script-${idx}.js`);
-        fs_1.default.writeFileSync(filepath, inlineScript, 'utf8');
-    });
     const allFilePaths = [];
-    let downloadedCount = 0;
     for (const fileUrl of jsFiles) {
         try {
             const filePath = truncateFileName(encodeFileNameOnly(fileUrl.replace(/https?:\/\//, '')));
@@ -156,11 +142,10 @@ async function downloadScripts(targetUrl, headless = true, rootFolder = 'data/cr
             allFilePaths.push(fullFilePath);
             guardFolderSync(path_1.default.dirname(fullFilePath));
             await downloadFile(fileUrl, fullFilePath);
-            downloadedCount++;
             if (jsFiles.size > 5) {
             }
         }
         catch (error) { }
     }
-    return allFilePaths;
+    return { allFilePaths, domainFolder };
 }

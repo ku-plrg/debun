@@ -7,23 +7,23 @@ export function mergeHashData(
 ): HashData {
   const merged = { ...data1 };
 
-  for (const graphSize in data2) {
-    if (!merged[graphSize]) {
-      merged[graphSize] = {};
+  for (const nodes in data2) {
+    if (!merged[nodes]) {
+      merged[nodes] = {};
     }
 
-    for (const hash in data2[graphSize]) {
-      if (!merged[graphSize][hash]) {
-        merged[graphSize][hash] = {};
+    for (const hash in data2[nodes]) {
+      if (!merged[nodes][hash]) {
+        merged[nodes][hash] = {};
       }
 
-      for (const libIdx in data2[graphSize][hash]) {
+      for (const libIdx in data2[nodes][hash]) {
         const key = Number(libIdx) + lib_data1;
-        if (!merged[graphSize][hash][key]) {
-          merged[graphSize][hash][key] = [];
+        if (!merged[nodes][hash][key]) {
+          merged[nodes][hash][key] = [];
         }
 
-        merged[graphSize][hash][key].push(...data2[graphSize][hash][key]);
+        merged[nodes][hash][key].push(...data2[nodes][hash][libIdx]);
       }
     }
   }
@@ -34,7 +34,7 @@ export function mergeHashData(
 export function mergeLibData(data1: LibData, data2: LibData) {
   const merged = { ...data1 };
 
-  const libcnt = Object.keys(merged).length;
+  const libcnt = Math.max(0, ...Object.keys(merged).map(Number));
 
   for (const libIdx in data2) {
     const key = Number(libIdx) + libcnt;

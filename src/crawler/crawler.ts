@@ -98,15 +98,6 @@ function getPreloadScripts(page: Page) {
   });
 }
 
-function getInlineScripts(page: Page) {
-  return page.evaluate(() => {
-    const scriptElements = Array.from(document.querySelectorAll('script'));
-    return scriptElements
-      .filter((script) => !script.src && script?.textContent?.trim())
-      .map((script) => script.textContent ?? '');
-  });
-}
-
 function guardFolderSync(dirPath: string) {
   if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
 }
@@ -154,7 +145,6 @@ async function downloadScripts(
   const preloadScripts = await getPreloadScripts(page);
   preloadScripts.forEach((scriptUrl) => jsFiles.add(scriptUrl));
 
-  const inlineScripts = await getInlineScripts(page);
   await browser.close();
 
   const domainFolder = path.join(
@@ -165,13 +155,7 @@ async function downloadScripts(
   );
   guardFolderSync(domainFolder);
 
-  inlineScripts.forEach((inlineScript, idx) => {
-    const filepath = path.join(domainFolder, `browser-script-${idx}.js`);
-    fs.writeFileSync(filepath, inlineScript, 'utf8');
-  });
-
   const allFilePaths: string[] = [];
-  let downloadedCount = 0;
 
   for (const fileUrl of jsFiles) {
     try {
@@ -182,12 +166,11 @@ async function downloadScripts(
       allFilePaths.push(fullFilePath);
       guardFolderSync(path.dirname(fullFilePath));
       await downloadFile(fileUrl, fullFilePath);
-      downloadedCount++;
       if (jsFiles.size > 5) {
       }
     } catch (error) {}
   }
-  return allFilePaths;
+  return { allFilePaths, domainFolder };
 }
 
 export { downloadScripts };

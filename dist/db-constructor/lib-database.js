@@ -56,9 +56,6 @@ const parseVersionString = (version) => {
         patchSuffix,
     ];
 };
-function isJS(files) {
-    return files.filter((file) => file.endsWith('js') || file.endsWith('mjs') || file.endsWith('cjs'));
-}
 async function buildDatabase(dirPath) {
     var _a;
     let allLibs = {};
@@ -80,11 +77,10 @@ async function buildDatabase(dirPath) {
                 return fs_1.default.existsSync(dirPath) && fs_1.default.statSync(dirPath).isDirectory();
             });
             const patterns = targetDirs.length > 0
-                ? targetDirs.map((dir) => `${dir}/**/*`)
-                : ['**/*'];
+                ? targetDirs.map((dir) => `${dir}/**/*.{js,cjs,mjs}`)
+                : ['**/*.{js,cjs,mjs}'];
             const files = await (0, fast_glob_1.default)(patterns, { cwd: versionPath });
-            const jsFiles = isJS(files);
-            for (const file of jsFiles) {
+            for (const file of files) {
                 try {
                     const code = (0, fs_1.readFileSync)((0, path_1.join)(versionPath, file), 'utf-8');
                     try {

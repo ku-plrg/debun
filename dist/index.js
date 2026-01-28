@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addPackage = addPackage;
+exports.addPackages = addPackages;
 exports.detectLibrary = detectLibrary;
 const crawler_1 = require("./crawler/crawler");
 const fingerprint_collector_1 = __importDefault(require("./fingerprint-collector"));
@@ -27,11 +27,13 @@ Usage:
   debun detect <path>        Detect libraries from local JavaScript files/directory
   debun detect -w <url>      Detect libraries from a web page URL
   debun add <pkg>            Add a new package to the database
-  debun --version            Show version
+  debun reset                Reset the database to the original state
+  debun -v, --version        Show version
+  debun -h, --help           Show help message
 
 Options:
+  --save                     Save downloaded scripts to local files (for detect command)
   -w, --web                  Treat input as a web URL (for detect command)
-  -h, --help                 Show help message
 
 Examples:
   debun detect ./src/js
@@ -42,7 +44,7 @@ Examples:
 function printVersion() {
     console.log(`debun v${VERSION}`);
 }
-async function addPackage(packageName) {
+async function addPackages(packageNames) {
     function filterSemverOnly(versions) {
         return versions
             .filter((v) => v && semver_1.default.valid(v))
@@ -50,7 +52,6 @@ async function addPackage(packageName) {
     }
     async function getAllVersions(pkgName) {
         const cmd = `npm view "${pkgName}" versions --json`;
-        console.log(`> ${cmd}`);
         const { stdout } = await execAsync(cmd, { maxBuffer: 1024 * 1024 * 10 });
         let versions = [];
         try {
@@ -65,55 +66,70 @@ async function addPackage(packageName) {
         }
         return filterSemverOnly(versions);
     }
-    console.log(`Adding package: ${packageName}`);
-    function getInstalledPkgDir(baseDir, pkgName) {
-        if (pkgName.startsWith('@')) {
-            const [scope, name] = pkgName.split('/');
-            return path_1.default.join(baseDir, 'node_modules', scope, name);
-        }
-        return path_1.default.join(baseDir, 'node_modules', pkgName);
-    }
-    try {
-        const versions = await getAllVersions(packageName);
-        console.log(`Found ${versions.length} versions for package ${packageName}`);
-        for (const version of versions) {
-            const tempDir = fs_1.default.mkdtempSync(path_1.default.join('/tmp', 'debun-'));
-            try {
-                const cmd = `cd "${tempDir}" && npm pack ${packageName}@${version}`;
-                await execAsync(cmd, { maxBuffer: 1024 * 1024 * 10 });
-                const tarballName = `${packageName.replace('@', '').replace('/', '-')}-${version}.tgz`;
-                const tarballPath = path_1.default.join(tempDir, tarballName);
-                const extractCmd = `tar -xzf "${tarballPath}" -C "${tempDir}"`;
-                await execAsync(extractCmd, { maxBuffer: 1024 * 1024 * 10 });
-                const pkgDir = getInstalledPkgDir(tempDir, `package${packageName.startsWith('@') ? `/${packageName.split('/')[1]}` : ''}`);
-                const { allLibs, allHashes } = await (0, lib_database_1.buildDatabase)(pkgDir);
-                const dbDir = path_1.default.join(__dirname, 'data');
-                const existingLibs = JSON.parse(fs_1.default.readFileSync(path_1.default.join(dbDir, 'all-libs.json'), 'utf-8'));
-                const existingHashes = JSON.parse(fs_1.default.readFileSync(path_1.default.join(dbDir, 'all-hash.json'), 'utf-8'));
-                const { mergedHashData, mergedLibData } = (0, merge_database_1.mergeDatabases)(existingHashes, existingLibs, allHashes, allLibs);
-                fs_1.default.writeFileSync(path_1.default.join(dbDir, 'all-hash.json'), JSON.stringify(mergedHashData, null, 2));
-                fs_1.default.writeFileSync(path_1.default.join(dbDir, 'all-libs.json'), JSON.stringify(mergedLibData, null, 2));
-            }
-            finally {
-                fs_1.default.rmSync(tempDir, { recursive: true, force: true });
+    const dir = path_1.default.join(__dirname, 'temp');
+    fs_1.default.mkdirSync(dir, { recursive: true });
+    for (const packageName of packageNames) {
+        const tempDir = path_1.default.join(dir, packageName.replace('/', '_'));
+        console.log(`Adding package: ${packageName}`);
+        try {
+            const versions = await getAllVersions(packageName);
+            console.log(`Found ${versions.length} versions for package ${packageName}`);
+            for (const version of versions) {
+                const versionDir = path_1.default.join(tempDir, version);
+                fs_1.default.mkdirSync(versionDir, { recursive: true });
+                try {
+                    const cmd = `cd "${dir}" && npm pack ${packageName}@${version}`;
+                    await execAsync(cmd, { maxBuffer: 1024 * 1024 * 10 });
+                    const tarballName = `${packageName.replace('@', '').replace('/', '-')}-${version}.tgz`;
+                    const tarballPath = path_1.default.join(dir, tarballName);
+                    const extractCmd = `tar -xzf "${tarballPath}" -C "${versionDir}" --strip-components=1 && rm "${tarballPath}"`;
+                    await execAsync(extractCmd, { maxBuffer: 1024 * 1024 * 10 });
+                }
+                catch (err) {
+                    console.error(`Failed to process ${packageName}@${version}: ${err.message}`);
+                }
             }
         }
+        catch (err) {
+            console.error(`Failed to get versions for package ${packageName}: ${err.message}`);
+        }
     }
-    catch (err) {
-        console.error(`Failed to get versions for package ${packageName}: ${err.message}`);
-        return;
-    }
+    const { allLibs, allHashes } = await (0, lib_database_1.buildDatabase)(dir);
+    fs_1.default.rmSync(dir, { recursive: true, force: true });
+    const dbDir = path_1.default.join(__dirname, 'data');
+    const existingLibs = JSON.parse(fs_1.default.readFileSync(path_1.default.join(dbDir, 'all-libs.json'), 'utf-8'));
+    const existingHashes = JSON.parse(fs_1.default.readFileSync(path_1.default.join(dbDir, 'all-hash.json'), 'utf-8'));
+    const { mergedHashData, mergedLibData } = (0, merge_database_1.mergeDatabases)(existingHashes, existingLibs, allHashes, allLibs);
+    console.log('Database updated successfully.');
+    fs_1.default.writeFileSync(path_1.default.join(dbDir, 'all-hash.json'), JSON.stringify(mergedHashData));
+    fs_1.default.writeFileSync(path_1.default.join(dbDir, 'all-libs.json'), JSON.stringify(mergedLibData));
 }
-async function detectLibrary(urlOrpath, isWeb = false) {
+async function detectLibrary(urlOrpath, isWeb = false, save = false) {
     let filePaths = [];
+    let mainFolder = '';
+    const isFile = (() => {
+        try {
+            return fs_1.default.lstatSync(urlOrpath).isFile();
+        }
+        catch {
+            return false;
+        }
+    })();
     if (isWeb) {
-        filePaths = await (0, crawler_1.downloadScripts)(urlOrpath);
+        const { allFilePaths, domainFolder } = await (0, crawler_1.downloadScripts)(urlOrpath);
+        filePaths = allFilePaths;
+        mainFolder = domainFolder;
     }
     else {
-        filePaths = await (0, fast_glob_1.default)('**/*.{js,cjs,mjs}', {
-            cwd: urlOrpath,
-            absolute: true,
-        });
+        if (isFile) {
+            filePaths = [path_1.default.resolve(urlOrpath)];
+        }
+        else {
+            filePaths = await (0, fast_glob_1.default)('**/*.{js,cjs,mjs}', {
+                cwd: urlOrpath,
+                absolute: true,
+            });
+        }
     }
     const mergeUnique = (target, source) => {
         for (const item of source) {
@@ -159,15 +175,19 @@ async function detectLibrary(urlOrpath, isWeb = false) {
     const scores = [...merged.values()];
     if (scores.length === 0) {
         console.log('No libraries detected.');
-        return;
     }
-    console.log('Detected libraries:');
-    for (const score of scores) {
-        const type3Version = score.type3Versions.join('@');
-        const type2Version = score.type2Versions.join('@');
-        const topVersion = score.topVersions.join('@');
-        const version = type3Version || type2Version || topVersion;
-        console.log(`  ${score.libName === 'react-dom' ? 'react' : score.libName}@${version}`);
+    else {
+        console.log('Detected libraries:');
+        for (const score of scores) {
+            const type3Version = score.type3Versions.join('@');
+            const type2Version = score.type2Versions.join('@');
+            const topVersion = score.topVersions.join('@');
+            const version = type3Version || type2Version || topVersion;
+            console.log(`${score.libName}@${version}`);
+        }
+    }
+    if (isWeb && !save) {
+        fs_1.default.rmSync(mainFolder, { recursive: true, force: true });
     }
 }
 function parseArgs(argv) {
@@ -175,17 +195,17 @@ function parseArgs(argv) {
     const flags = {};
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
-        if (arg === '-v' || arg === '--verbose') {
-            flags.verbose = true;
-        }
-        else if (arg === '-w' || arg === '--web') {
+        if (arg === '-w' || arg === '--web') {
             flags.web = true;
         }
-        else if (arg === '--version') {
+        else if (arg === '-v' || arg === '--version') {
             flags.version = true;
         }
         else if (arg === '-h' || arg === '--help') {
             flags.help = true;
+        }
+        else if (arg === '--save') {
+            flags.save = true;
         }
         else if (!arg.startsWith('-')) {
             args.push(arg);
@@ -215,28 +235,30 @@ async function main() {
                 console.log('Usage: debun detect <path> or debun detect -w <url>');
                 process.exit(1);
             }
-            await detectLibrary(target, flags.web);
+            await detectLibrary(target, flags.web, flags.save);
             break;
         }
         case 'add': {
-            const packageName = args[1];
-            if (!packageName) {
-                console.log('Usage: debun add <package-name>');
+            const packageNames = args.slice(1);
+            if (packageNames.length === 0) {
+                console.log('Usage: debun add <package-name1> <package-name2> ...');
                 process.exit(1);
             }
-            await addPackage(packageName);
+            await addPackages(packageNames);
+            break;
+        }
+        case 'reset': {
+            const dbDir = path_1.default.join(__dirname, 'data');
+            const originalHash = fs_1.default.readFileSync(path_1.default.join(dbDir, 'cache', 'all-hash.json'), 'utf-8');
+            const originalLibs = fs_1.default.readFileSync(path_1.default.join(dbDir, 'cache', 'all-libs.json'), 'utf-8');
+            fs_1.default.writeFileSync(path_1.default.join(dbDir, 'all-hash.json'), originalHash);
+            fs_1.default.writeFileSync(path_1.default.join(dbDir, 'all-libs.json'), originalLibs);
+            console.log('Database has been reset to the original state.');
             break;
         }
         default: {
-            if (fs_1.default.existsSync(command) ||
-                command.startsWith('http://') ||
-                command.startsWith('https://')) {
-                await detectLibrary(command);
-            }
-            else {
-                printHelp();
-                process.exit(1);
-            }
+            printHelp();
+            process.exit(1);
         }
     }
 }
