@@ -12,35 +12,85 @@ import fg from 'fast-glob';
 import semver from 'semver';
 import { exec } from 'child_process';
 import util from 'util';
+import chalk from 'chalk';
+import ora from 'ora';
+import boxen, { type Options as BoxenOptions } from 'boxen';
 const execAsync = util.promisify(exec);
 
 const VERSION = '1.0.2';
+
+const log = {
+  info: (msg: string) => console.log(chalk.blue('ℹ'), msg),
+  success: (msg: string) => console.log(chalk.green('✔'), msg),
+  warn: (msg: string) => console.log(chalk.yellow('⚠'), msg),
+  error: (msg: string) => console.log(chalk.red('✖'), msg),
+  title: (msg: string) => console.log(chalk.bold.cyan(`\n${msg}\n`)),
+  dim: (msg: string) => console.log(chalk.dim(msg)),
+  box: (msg: string, options?: BoxenOptions) =>
+    console.log(
+      boxen(msg, {
+        padding: 1,
+        borderColor: 'cyan',
+        borderStyle: 'round',
+        ...options,
+      })
+    ),
+};
+
 function printHelp() {
+  const title = chalk.bold.cyan('debun');
+  const description = chalk.dim(
+    'Detecting Bundled JavaScript Libraries using Property-Order Graphs'
+  );
+
+  console.log(
+    boxen(`${title}\n${description}`, {
+      padding: 1,
+      borderColor: 'cyan',
+      borderStyle: 'round',
+      textAlignment: 'center',
+    })
+  );
+
   console.log(`
-debun - Detecting Bundled JavaScript Libraries on Web using Property-Order Graphs
+${chalk.yellow.bold('📋 Commands:')}
+  ${chalk.green('detect')} ${chalk.dim('<path>')}        Detect libraries from local JavaScript files/directory
+  ${chalk.green('detect')} ${chalk.dim('-w <url>')}      Detect libraries from a web page URL
+  ${chalk.green('add')} ${chalk.dim('<pkg>')}            Add a new package to the database
+  ${chalk.green('reset')}                Reset the database to the original state
+  ${chalk.green('list')}                 List all libraries in the database
 
-Usage:
-  debun detect <path>        Detect libraries from local JavaScript files/directory
-  debun detect -w <url>      Detect libraries from a web page URL
-  debun add <pkg>            Add a new package to the database
-  debun reset                Reset the database to the original state
-  debun -v, --version        Show version
-  debun -h, --help           Show help message
+${chalk.yellow.bold('⚙️  Options:')}
+  ${chalk.dim('--save')}                     Save downloaded scripts to local files
+  ${chalk.dim('-w, --web')}                  Treat input as a web URL
+  ${chalk.dim('-v, --version')}              Show version
+  ${chalk.dim('-h, --help')}                 Show help message
 
-Options:
-  --save                     Save downloaded scripts to local files (for detect command)
-  -w, --web                  Treat input as a web URL (for detect command)
-
-Examples:
-  debun detect ./src/js
-  debun detect -w https://example.com
-  debun add lodash
-  debun reset
+${chalk.yellow.bold('📝 Examples:')}
+  ${chalk.dim('$')} debun detect ${chalk.cyan('./src/js')}
+  ${chalk.dim('$')} debun detect -w ${chalk.cyan('https://example.com')}
+  ${chalk.dim('$')} debun add ${chalk.cyan('lodash')}
+  ${chalk.dim('$')} debun reset
 `);
 }
 
 function printVersion() {
-  console.log(`debun v${VERSION}`);
+  console.log(
+    boxen(`${chalk.bold.cyan('debun')} ${chalk.yellow('v' + VERSION)}`, {
+      padding: { top: 0, bottom: 0, left: 1, right: 1 },
+      borderColor: 'cyan',
+      borderStyle: 'round',
+    })
+  );
+}
+function getLibNamesFromDb(dbDir: string): string[] {
+  const allLibs: LibData = JSON.parse(
+    fs.readFileSync(path.join(dbDir, 'all-libs.json'), 'utf-8')
+  );
+  const libNames = Object.values(allLibs)
+    .map((lib) => lib.name)
+    .sort();
+  return libNames;
 }
 
 export async function addPackages(packageNames: string[]) {
@@ -58,7 +108,6 @@ export async function addPackages(packageNames: string[]) {
     try {
       versions = JSON.parse(stdout.trim());
     } catch (err) {
-      console.error(`versions JSON parse fail: ${pkgName}`);
       throw err;
     }
 
@@ -68,18 +117,58 @@ export async function addPackages(packageNames: string[]) {
 
     return filterSemverOnly(versions);
   }
+
   const dir = path.join(__dirname, 'temp');
   fs.mkdirSync(dir, { recursive: true });
-
+  const Liblist = getLibNamesFromDb(path.join(__dirname, 'data'));
+  let duplicateCount = 0;
   for (const packageName of packageNames) {
-    const tempDir = path.join(dir, packageName.replace('/', '_'));
-    console.log(`Adding package: ${packageName}`);
+    if (Liblist.includes(packageName)) {
+      duplicateCount++;
+      console.log(
+        boxen(
+          `Package ${chalk.bold(
+            packageName
+          )} already exists in the database, skipping...`,
+          {
+            padding: { top: 0, bottom: 0, left: 1, right: 1 },
+            borderColor: 'yellow',
+            borderStyle: 'round',
+          }
+        )
+      );
+      continue;
+    }
+    const tempDir = path.join(
+      dir,
+      packageName.replace('@', '').replace('/', '-')
+    );
+
+    console.log(
+      boxen(`📦 ${chalk.bold(packageName)}`, {
+        padding: { top: 0, bottom: 0, left: 1, right: 1 },
+        borderColor: 'blue',
+        borderStyle: 'round',
+      })
+    );
+
+    const versionSpinner = ora({
+      text: `Fetching versions for ${chalk.cyan(packageName)}...`,
+      spinner: 'dots',
+    }).start();
 
     try {
       const versions = await getAllVersions(packageName);
-      console.log(
-        `Found ${versions.length} versions for package ${packageName}`
+      versionSpinner.succeed(
+        `Found ${chalk.bold(versions.length)} versions for ${chalk.cyan(packageName)}`
       );
+
+      const downloadSpinner = ora({
+        text: `Downloading ${packageName}...`,
+        spinner: 'dots',
+      }).start();
+
+      let processed = 0;
       for (const version of versions) {
         const versionDir = path.join(tempDir, version);
         fs.mkdirSync(versionDir, { recursive: true });
@@ -91,21 +180,32 @@ export async function addPackages(packageNames: string[]) {
           const tarballPath = path.join(dir, tarballName);
           const extractCmd = `tar -xzf "${tarballPath}" -C "${versionDir}" --strip-components=1 && rm "${tarballPath}"`;
           await execAsync(extractCmd, { maxBuffer: 1024 * 1024 * 10 });
+          processed++;
+          downloadSpinner.text = `Downloading ${packageName}... ${chalk.dim(`(${processed}/${versions.length})`)} ${chalk.cyan(version)}`;
         } catch (err) {
-          console.error(
-            `Failed to process ${packageName}@${version}: ${(err as any).message}`
-          );
+          // Skip failed versions silently
         }
       }
+      downloadSpinner.succeed(
+        `Downloaded ${chalk.bold(processed)}/${versions.length} versions`
+      );
     } catch (err) {
-      console.error(
-        `Failed to get versions for package ${packageName}: ${(err as any).message}`
+      versionSpinner.fail(
+        `Failed to get versions for ${packageName}: ${(err as any).message}`
       );
     }
   }
 
+  const buildSpinner = ora({
+    text: 'Building database...',
+    spinner: 'dots',
+  }).start();
+
   const { allLibs, allHashes } = await buildDatabase(dir);
   fs.rmSync(dir, { recursive: true, force: true });
+
+  buildSpinner.text = 'Merging with existing database...';
+
   const dbDir = path.join(__dirname, 'data');
   const existingLibs: LibData = JSON.parse(
     fs.readFileSync(path.join(dbDir, 'all-libs.json'), 'utf-8')
@@ -120,7 +220,7 @@ export async function addPackages(packageNames: string[]) {
     allHashes,
     allLibs
   );
-  console.log('Database updated successfully.');
+
   fs.writeFileSync(
     path.join(dbDir, 'all-hash.json'),
     JSON.stringify(mergedHashData)
@@ -129,7 +229,24 @@ export async function addPackages(packageNames: string[]) {
     path.join(dbDir, 'all-libs.json'),
     JSON.stringify(mergedLibData)
   );
+  if (duplicateCount === packageNames.length) {
+    buildSpinner.info('No new packages were added to the database');
+  } else {
+    buildSpinner.succeed('Database updated successfully');
+
+    console.log(
+      boxen(
+        `Added ${chalk.bold(packageNames.length - duplicateCount)} package(s) to database`,
+        {
+          padding: { top: 0, bottom: 0, left: 1, right: 1 },
+          borderColor: 'green',
+          borderStyle: 'round',
+        }
+      )
+    );
+  }
 }
+
 export async function detectLibrary(
   urlOrpath: string,
   isWeb: boolean = false,
@@ -146,6 +263,21 @@ export async function detectLibrary(
     }
   })();
 
+  console.log(
+    boxen(`🔍 ${chalk.bold('Scanning')}\n${chalk.dim(urlOrpath)}`, {
+      padding: { top: 0, bottom: 0, left: 1, right: 1 },
+      borderColor: 'blue',
+      borderStyle: 'round',
+    })
+  );
+
+  const scanSpinner = ora({
+    text: isWeb
+      ? 'Downloading scripts from web...'
+      : 'Scanning for JavaScript files...',
+    spinner: 'dots',
+  }).start();
+
   if (isWeb) {
     const { allFilePaths, domainFolder } = await downloadScripts(urlOrpath);
     filePaths = allFilePaths;
@@ -161,6 +293,15 @@ export async function detectLibrary(
     }
   }
 
+  scanSpinner.succeed(
+    `Found ${chalk.bold(filePaths.length)} JavaScript file(s)`
+  );
+
+  const analyzeSpinner = ora({
+    text: 'Analyzing files...',
+    spinner: 'dots',
+  }).start();
+
   const mergeUnique = (target: string[], source: string[]) => {
     for (const item of source) {
       if (!target.includes(item)) target.push(item);
@@ -170,6 +311,8 @@ export async function detectLibrary(
 
   for (let i = 0; i < filePaths.length; i++) {
     const filePath = filePaths[i];
+    analyzeSpinner.text = `Analyzing files... ${chalk.dim(`(${i + 1}/${filePaths.length})`)}`;
+
     let raw;
     try {
       raw = fs.readFileSync(filePath, 'utf-8');
@@ -203,21 +346,50 @@ export async function detectLibrary(
       mergeUnique(existing.type3Versions, score.type3Versions);
     }
   }
+
+  analyzeSpinner.succeed('Analysis complete');
+
   const scores = [...merged.values()];
+
+  console.log();
   if (scores.length === 0) {
-    console.log('No libraries detected.');
+    console.log(
+      boxen(`${chalk.yellow('⚠')} No libraries detected`, {
+        padding: { top: 0, bottom: 0, left: 1, right: 1 },
+        borderColor: 'yellow',
+        borderStyle: 'round',
+      })
+    );
   } else {
-    console.log('Detected libraries:');
-    for (const score of scores) {
-      const type3Version = score.type3Versions.join('@');
-      const type2Version = score.type2Versions.join('@');
-      const topVersion = score.topVersions.join('@');
-      const version = type3Version || type2Version || topVersion;
-      console.log(`${score.libName}@${version}`);
-    }
+    const resultLines = scores
+      .map((score) => {
+        const type3Version = score.type3Versions.join(', ');
+        const type2Version = score.type2Versions.join(', ');
+        const topVersion = score.topVersions.join(', ');
+        const version = type3Version || type2Version || topVersion;
+        const libName = score.libName === 'react-dom' ? 'react' : score.libName;
+        return `  ${chalk.cyan('●')} ${chalk.bold(libName)} ${chalk.dim('@')} ${chalk.yellow(version)}`;
+      })
+      .join('\n');
+
+    console.log(
+      boxen(
+        `${chalk.bold.green('📚 Detected Libraries')}\n\n${resultLines}\n\n${chalk.dim(`Total: ${scores.length} library(ies)`)}`,
+        {
+          padding: 1,
+          borderColor: 'green',
+          borderStyle: 'round',
+        }
+      )
+    );
   }
-  if (isWeb && !save) {
-    fs.rmSync(mainFolder, { recursive: true, force: true });
+
+  if (isWeb) {
+    if (save) {
+      log.success(`Downloaded scripts saved to ${chalk.underline(mainFolder)}`);
+    } else {
+      fs.rmSync(mainFolder, { recursive: true, force: true });
+    }
   }
 }
 
@@ -266,7 +438,16 @@ async function main() {
     case 'detect': {
       const target = args[1];
       if (!target) {
-        console.log('Usage: debun detect <path> or debun detect -w <url>');
+        console.log(
+          boxen(
+            `${chalk.red('✖')} Missing target path or URL\n\n${chalk.dim('Usage: debun detect <path> or debun detect -w <url>')}`,
+            {
+              padding: { top: 0, bottom: 0, left: 1, right: 1 },
+              borderColor: 'red',
+              borderStyle: 'round',
+            }
+          )
+        );
         process.exit(1);
       }
       await detectLibrary(target, flags.web, flags.save);
@@ -275,13 +456,27 @@ async function main() {
     case 'add': {
       const packageNames = args.slice(1);
       if (packageNames.length === 0) {
-        console.log('Usage: debun add <package-name1> <package-name2> ...');
+        console.log(
+          boxen(
+            `${chalk.red('✖')} Missing package name(s)\n\n${chalk.dim('Usage: debun add <package-name1> <package-name2> ...')}`,
+            {
+              padding: { top: 0, bottom: 0, left: 1, right: 1 },
+              borderColor: 'red',
+              borderStyle: 'round',
+            }
+          )
+        );
         process.exit(1);
       }
       await addPackages(packageNames);
       break;
     }
     case 'reset': {
+      const spinner = ora({
+        text: 'Resetting database...',
+        spinner: 'dots',
+      }).start();
+
       const dbDir = path.join(__dirname, 'data');
       const originalHash = fs.readFileSync(
         path.join(dbDir, 'cache', 'all-hash.json'),
@@ -293,10 +488,42 @@ async function main() {
       );
       fs.writeFileSync(path.join(dbDir, 'all-hash.json'), originalHash);
       fs.writeFileSync(path.join(dbDir, 'all-libs.json'), originalLibs);
-      console.log('Database has been reset to the original state.');
+
+      spinner.succeed('Database has been reset to the original state');
+      break;
+    }
+    case 'list': {
+      const spinner = ora({
+        text: 'Loading library list...',
+        spinner: 'dots',
+      }).start();
+      const dbDir = path.join(__dirname, 'data');
+      const libNames = getLibNamesFromDb(dbDir);
+      const outputPath = path.join(dbDir, 'library-list.txt');
+      fs.writeFileSync(outputPath, libNames.join('\n') + '\n');
+
+      spinner.succeed('Library list generated');
+
+      console.log(
+        boxen(
+          `Saved to ${chalk.underline(outputPath)}\n\n📦 ${chalk.bold(libNames.length)} libraries in database`,
+          {
+            padding: { top: 0, bottom: 0, left: 1, right: 1 },
+            borderColor: 'green',
+            borderStyle: 'round',
+          }
+        )
+      );
       break;
     }
     default: {
+      console.log(
+        boxen(`${chalk.red('✖')} Unknown command: ${chalk.bold(command)}`, {
+          padding: { top: 0, bottom: 0, left: 1, right: 1 },
+          borderColor: 'red',
+          borderStyle: 'round',
+        })
+      );
       printHelp();
       process.exit(1);
     }

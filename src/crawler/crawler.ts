@@ -19,15 +19,6 @@ function truncateFileName(fileName: string) {
 }
 
 async function downloadFileFallback(url: string, filePath: string) {
-  const browser = await puppeteer.launch({ headless: false });
-  const page = await browser.newPage();
-  await page.goto(url);
-  const content = await page.evaluate(() => document.body.innerText);
-  await browser.close();
-  fs.writeFileSync(filePath, content, 'utf8');
-}
-
-async function downloadFileFallback2(url: string, filePath: string) {
   try {
     const response = await axios({
       method: 'get',
@@ -68,7 +59,7 @@ async function downloadFile(url: string, filePath: string) {
         } else throw new Error(`[${response.status}] ${response.statusText}`);
       })
       .catch((err) => {
-        downloadFileFallback2(url, filePath)
+        downloadFileFallback(url, filePath)
           .then(() => resolve(true))
           .catch((err2) => {
             resolve(false);
@@ -154,7 +145,6 @@ async function downloadScripts(
     reachableUrl.host
   );
   guardFolderSync(domainFolder);
-
   const allFilePaths: string[] = [];
 
   for (const fileUrl of jsFiles) {
@@ -166,8 +156,6 @@ async function downloadScripts(
       allFilePaths.push(fullFilePath);
       guardFolderSync(path.dirname(fullFilePath));
       await downloadFile(fileUrl, fullFilePath);
-      if (jsFiles.size > 5) {
-      }
     } catch (error) {}
   }
   return { allFilePaths, domainFolder };

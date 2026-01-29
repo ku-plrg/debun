@@ -17,33 +17,68 @@ const fast_glob_1 = __importDefault(require("fast-glob"));
 const semver_1 = __importDefault(require("semver"));
 const child_process_1 = require("child_process");
 const util_1 = __importDefault(require("util"));
+const chalk_1 = __importDefault(require("chalk"));
+const ora_1 = __importDefault(require("ora"));
+const boxen_1 = __importDefault(require("boxen"));
 const execAsync = util_1.default.promisify(child_process_1.exec);
 const VERSION = '1.0.2';
+const log = {
+    info: (msg) => console.log(chalk_1.default.blue('ℹ'), msg),
+    success: (msg) => console.log(chalk_1.default.green('✔'), msg),
+    warn: (msg) => console.log(chalk_1.default.yellow('⚠'), msg),
+    error: (msg) => console.log(chalk_1.default.red('✖'), msg),
+    title: (msg) => console.log(chalk_1.default.bold.cyan(`\n${msg}\n`)),
+    dim: (msg) => console.log(chalk_1.default.dim(msg)),
+    box: (msg, options) => console.log((0, boxen_1.default)(msg, {
+        padding: 1,
+        borderColor: 'cyan',
+        borderStyle: 'round',
+        ...options,
+    })),
+};
 function printHelp() {
+    const title = chalk_1.default.bold.cyan('debun');
+    const description = chalk_1.default.dim('Detecting Bundled JavaScript Libraries using Property-Order Graphs');
+    console.log((0, boxen_1.default)(`${title}\n${description}`, {
+        padding: 1,
+        borderColor: 'cyan',
+        borderStyle: 'round',
+        textAlignment: 'center',
+    }));
     console.log(`
-debun - Detecting Bundled JavaScript Libraries on Web using Property-Order Graphs
+${chalk_1.default.yellow.bold('📋 Commands:')}
+  ${chalk_1.default.green('detect')} ${chalk_1.default.dim('<path>')}        Detect libraries from local JavaScript files/directory
+  ${chalk_1.default.green('detect')} ${chalk_1.default.dim('-w <url>')}      Detect libraries from a web page URL
+  ${chalk_1.default.green('add')} ${chalk_1.default.dim('<pkg>')}            Add a new package to the database
+  ${chalk_1.default.green('reset')}                Reset the database to the original state
+  ${chalk_1.default.green('list')}                 List all libraries in the database
 
-Usage:
-  debun detect <path>        Detect libraries from local JavaScript files/directory
-  debun detect -w <url>      Detect libraries from a web page URL
-  debun add <pkg>            Add a new package to the database
-  debun reset                Reset the database to the original state
-  debun -v, --version        Show version
-  debun -h, --help           Show help message
+${chalk_1.default.yellow.bold('⚙️  Options:')}
+  ${chalk_1.default.dim('--save')}                     Save downloaded scripts to local files
+  ${chalk_1.default.dim('-w, --web')}                  Treat input as a web URL
+  ${chalk_1.default.dim('-v, --version')}              Show version
+  ${chalk_1.default.dim('-h, --help')}                 Show help message
 
-Options:
-  --save                     Save downloaded scripts to local files (for detect command)
-  -w, --web                  Treat input as a web URL (for detect command)
-
-Examples:
-  debun detect ./src/js
-  debun detect -w https://example.com
-  debun add lodash
-  debun reset
+${chalk_1.default.yellow.bold('📝 Examples:')}
+  ${chalk_1.default.dim('$')} debun detect ${chalk_1.default.cyan('./src/js')}
+  ${chalk_1.default.dim('$')} debun detect -w ${chalk_1.default.cyan('https://example.com')}
+  ${chalk_1.default.dim('$')} debun add ${chalk_1.default.cyan('lodash')}
+  ${chalk_1.default.dim('$')} debun reset
 `);
 }
 function printVersion() {
-    console.log(`debun v${VERSION}`);
+    console.log((0, boxen_1.default)(`${chalk_1.default.bold.cyan('debun')} ${chalk_1.default.yellow('v' + VERSION)}`, {
+        padding: { top: 0, bottom: 0, left: 1, right: 1 },
+        borderColor: 'cyan',
+        borderStyle: 'round',
+    }));
+}
+function getLibNamesFromDb(dbDir) {
+    const allLibs = JSON.parse(fs_1.default.readFileSync(path_1.default.join(dbDir, 'all-libs.json'), 'utf-8'));
+    const libNames = Object.values(allLibs)
+        .map((lib) => lib.name)
+        .sort();
+    return libNames;
 }
 async function addPackages(packageNames) {
     function filterSemverOnly(versions) {
@@ -59,7 +94,6 @@ async function addPackages(packageNames) {
             versions = JSON.parse(stdout.trim());
         }
         catch (err) {
-            console.error(`versions JSON parse fail: ${pkgName}`);
             throw err;
         }
         if (!Array.isArray(versions)) {
@@ -69,12 +103,36 @@ async function addPackages(packageNames) {
     }
     const dir = path_1.default.join(__dirname, 'temp');
     fs_1.default.mkdirSync(dir, { recursive: true });
+    const Liblist = getLibNamesFromDb(path_1.default.join(__dirname, 'data'));
+    let duplicateCount = 0;
     for (const packageName of packageNames) {
-        const tempDir = path_1.default.join(dir, packageName.replace('/', '_'));
-        console.log(`Adding package: ${packageName}`);
+        if (Liblist.includes(packageName)) {
+            duplicateCount++;
+            console.log((0, boxen_1.default)(`Package ${chalk_1.default.bold(packageName)} already exists in the database, skipping...`, {
+                padding: { top: 0, bottom: 0, left: 1, right: 1 },
+                borderColor: 'yellow',
+                borderStyle: 'round',
+            }));
+            continue;
+        }
+        const tempDir = path_1.default.join(dir, packageName.replace('@', '').replace('/', '-'));
+        console.log((0, boxen_1.default)(`📦 ${chalk_1.default.bold(packageName)}`, {
+            padding: { top: 0, bottom: 0, left: 1, right: 1 },
+            borderColor: 'blue',
+            borderStyle: 'round',
+        }));
+        const versionSpinner = (0, ora_1.default)({
+            text: `Fetching versions for ${chalk_1.default.cyan(packageName)}...`,
+            spinner: 'dots',
+        }).start();
         try {
             const versions = await getAllVersions(packageName);
-            console.log(`Found ${versions.length} versions for package ${packageName}`);
+            versionSpinner.succeed(`Found ${chalk_1.default.bold(versions.length)} versions for ${chalk_1.default.cyan(packageName)}`);
+            const downloadSpinner = (0, ora_1.default)({
+                text: `Downloading ${packageName}...`,
+                spinner: 'dots',
+            }).start();
+            let processed = 0;
             for (const version of versions) {
                 const versionDir = path_1.default.join(tempDir, version);
                 fs_1.default.mkdirSync(versionDir, { recursive: true });
@@ -85,25 +143,43 @@ async function addPackages(packageNames) {
                     const tarballPath = path_1.default.join(dir, tarballName);
                     const extractCmd = `tar -xzf "${tarballPath}" -C "${versionDir}" --strip-components=1 && rm "${tarballPath}"`;
                     await execAsync(extractCmd, { maxBuffer: 1024 * 1024 * 10 });
+                    processed++;
+                    downloadSpinner.text = `Downloading ${packageName}... ${chalk_1.default.dim(`(${processed}/${versions.length})`)} ${chalk_1.default.cyan(version)}`;
                 }
                 catch (err) {
-                    console.error(`Failed to process ${packageName}@${version}: ${err.message}`);
+                    // Skip failed versions silently
                 }
             }
+            downloadSpinner.succeed(`Downloaded ${chalk_1.default.bold(processed)}/${versions.length} versions`);
         }
         catch (err) {
-            console.error(`Failed to get versions for package ${packageName}: ${err.message}`);
+            versionSpinner.fail(`Failed to get versions for ${packageName}: ${err.message}`);
         }
     }
+    const buildSpinner = (0, ora_1.default)({
+        text: 'Building database...',
+        spinner: 'dots',
+    }).start();
     const { allLibs, allHashes } = await (0, lib_database_1.buildDatabase)(dir);
     fs_1.default.rmSync(dir, { recursive: true, force: true });
+    buildSpinner.text = 'Merging with existing database...';
     const dbDir = path_1.default.join(__dirname, 'data');
     const existingLibs = JSON.parse(fs_1.default.readFileSync(path_1.default.join(dbDir, 'all-libs.json'), 'utf-8'));
     const existingHashes = JSON.parse(fs_1.default.readFileSync(path_1.default.join(dbDir, 'all-hash.json'), 'utf-8'));
     const { mergedHashData, mergedLibData } = (0, merge_database_1.mergeDatabases)(existingHashes, existingLibs, allHashes, allLibs);
-    console.log('Database updated successfully.');
     fs_1.default.writeFileSync(path_1.default.join(dbDir, 'all-hash.json'), JSON.stringify(mergedHashData));
     fs_1.default.writeFileSync(path_1.default.join(dbDir, 'all-libs.json'), JSON.stringify(mergedLibData));
+    if (duplicateCount === packageNames.length) {
+        buildSpinner.info('No new packages were added to the database');
+    }
+    else {
+        buildSpinner.succeed('Database updated successfully');
+        console.log((0, boxen_1.default)(`Added ${chalk_1.default.bold(packageNames.length - duplicateCount)} package(s) to database`, {
+            padding: { top: 0, bottom: 0, left: 1, right: 1 },
+            borderColor: 'green',
+            borderStyle: 'round',
+        }));
+    }
 }
 async function detectLibrary(urlOrpath, isWeb = false, save = false) {
     let filePaths = [];
@@ -116,6 +192,17 @@ async function detectLibrary(urlOrpath, isWeb = false, save = false) {
             return false;
         }
     })();
+    console.log((0, boxen_1.default)(`🔍 ${chalk_1.default.bold('Scanning')}\n${chalk_1.default.dim(urlOrpath)}`, {
+        padding: { top: 0, bottom: 0, left: 1, right: 1 },
+        borderColor: 'blue',
+        borderStyle: 'round',
+    }));
+    const scanSpinner = (0, ora_1.default)({
+        text: isWeb
+            ? 'Downloading scripts from web...'
+            : 'Scanning for JavaScript files...',
+        spinner: 'dots',
+    }).start();
     if (isWeb) {
         const { allFilePaths, domainFolder } = await (0, crawler_1.downloadScripts)(urlOrpath);
         filePaths = allFilePaths;
@@ -132,6 +219,11 @@ async function detectLibrary(urlOrpath, isWeb = false, save = false) {
             });
         }
     }
+    scanSpinner.succeed(`Found ${chalk_1.default.bold(filePaths.length)} JavaScript file(s)`);
+    const analyzeSpinner = (0, ora_1.default)({
+        text: 'Analyzing files...',
+        spinner: 'dots',
+    }).start();
     const mergeUnique = (target, source) => {
         for (const item of source) {
             if (!target.includes(item))
@@ -141,6 +233,7 @@ async function detectLibrary(urlOrpath, isWeb = false, save = false) {
     const merged = new Map();
     for (let i = 0; i < filePaths.length; i++) {
         const filePath = filePaths[i];
+        analyzeSpinner.text = `Analyzing files... ${chalk_1.default.dim(`(${i + 1}/${filePaths.length})`)}`;
         let raw;
         try {
             raw = fs_1.default.readFileSync(filePath, 'utf-8');
@@ -173,22 +266,40 @@ async function detectLibrary(urlOrpath, isWeb = false, save = false) {
             mergeUnique(existing.type3Versions, score.type3Versions);
         }
     }
+    analyzeSpinner.succeed('Analysis complete');
     const scores = [...merged.values()];
+    console.log();
     if (scores.length === 0) {
-        console.log('No libraries detected.');
+        console.log((0, boxen_1.default)(`${chalk_1.default.yellow('⚠')} No libraries detected`, {
+            padding: { top: 0, bottom: 0, left: 1, right: 1 },
+            borderColor: 'yellow',
+            borderStyle: 'round',
+        }));
     }
     else {
-        console.log('Detected libraries:');
-        for (const score of scores) {
-            const type3Version = score.type3Versions.join('@');
-            const type2Version = score.type2Versions.join('@');
-            const topVersion = score.topVersions.join('@');
+        const resultLines = scores
+            .map((score) => {
+            const type3Version = score.type3Versions.join(', ');
+            const type2Version = score.type2Versions.join(', ');
+            const topVersion = score.topVersions.join(', ');
             const version = type3Version || type2Version || topVersion;
-            console.log(`${score.libName}@${version}`);
-        }
+            const libName = score.libName === 'react-dom' ? 'react' : score.libName;
+            return `  ${chalk_1.default.cyan('●')} ${chalk_1.default.bold(libName)} ${chalk_1.default.dim('@')} ${chalk_1.default.yellow(version)}`;
+        })
+            .join('\n');
+        console.log((0, boxen_1.default)(`${chalk_1.default.bold.green('📚 Detected Libraries')}\n\n${resultLines}\n\n${chalk_1.default.dim(`Total: ${scores.length} library(ies)`)}`, {
+            padding: 1,
+            borderColor: 'green',
+            borderStyle: 'round',
+        }));
     }
-    if (isWeb && !save) {
-        fs_1.default.rmSync(mainFolder, { recursive: true, force: true });
+    if (isWeb) {
+        if (save) {
+            log.success(`Downloaded scripts saved to ${chalk_1.default.underline(mainFolder)}`);
+        }
+        else {
+            fs_1.default.rmSync(mainFolder, { recursive: true, force: true });
+        }
     }
 }
 function parseArgs(argv) {
@@ -233,7 +344,11 @@ async function main() {
         case 'detect': {
             const target = args[1];
             if (!target) {
-                console.log('Usage: debun detect <path> or debun detect -w <url>');
+                console.log((0, boxen_1.default)(`${chalk_1.default.red('✖')} Missing target path or URL\n\n${chalk_1.default.dim('Usage: debun detect <path> or debun detect -w <url>')}`, {
+                    padding: { top: 0, bottom: 0, left: 1, right: 1 },
+                    borderColor: 'red',
+                    borderStyle: 'round',
+                }));
                 process.exit(1);
             }
             await detectLibrary(target, flags.web, flags.save);
@@ -242,22 +357,52 @@ async function main() {
         case 'add': {
             const packageNames = args.slice(1);
             if (packageNames.length === 0) {
-                console.log('Usage: debun add <package-name1> <package-name2> ...');
+                console.log((0, boxen_1.default)(`${chalk_1.default.red('✖')} Missing package name(s)\n\n${chalk_1.default.dim('Usage: debun add <package-name1> <package-name2> ...')}`, {
+                    padding: { top: 0, bottom: 0, left: 1, right: 1 },
+                    borderColor: 'red',
+                    borderStyle: 'round',
+                }));
                 process.exit(1);
             }
             await addPackages(packageNames);
             break;
         }
         case 'reset': {
+            const spinner = (0, ora_1.default)({
+                text: 'Resetting database...',
+                spinner: 'dots',
+            }).start();
             const dbDir = path_1.default.join(__dirname, 'data');
             const originalHash = fs_1.default.readFileSync(path_1.default.join(dbDir, 'cache', 'all-hash.json'), 'utf-8');
             const originalLibs = fs_1.default.readFileSync(path_1.default.join(dbDir, 'cache', 'all-libs.json'), 'utf-8');
             fs_1.default.writeFileSync(path_1.default.join(dbDir, 'all-hash.json'), originalHash);
             fs_1.default.writeFileSync(path_1.default.join(dbDir, 'all-libs.json'), originalLibs);
-            console.log('Database has been reset to the original state.');
+            spinner.succeed('Database has been reset to the original state');
+            break;
+        }
+        case 'list': {
+            const spinner = (0, ora_1.default)({
+                text: 'Loading library list...',
+                spinner: 'dots',
+            }).start();
+            const dbDir = path_1.default.join(__dirname, 'data');
+            const libNames = getLibNamesFromDb(dbDir);
+            const outputPath = path_1.default.join(dbDir, 'library-list.txt');
+            fs_1.default.writeFileSync(outputPath, libNames.join('\n') + '\n');
+            spinner.succeed('Library list generated');
+            console.log((0, boxen_1.default)(`Saved to ${chalk_1.default.underline(outputPath)}\n\n📦 ${chalk_1.default.bold(libNames.length)} libraries in database`, {
+                padding: { top: 0, bottom: 0, left: 1, right: 1 },
+                borderColor: 'green',
+                borderStyle: 'round',
+            }));
             break;
         }
         default: {
+            console.log((0, boxen_1.default)(`${chalk_1.default.red('✖')} Unknown command: ${chalk_1.default.bold(command)}`, {
+                padding: { top: 0, bottom: 0, left: 1, right: 1 },
+                borderColor: 'red',
+                borderStyle: 'round',
+            }));
             printHelp();
             process.exit(1);
         }

@@ -56,7 +56,6 @@ export async function buildDatabase(dirPath: string) {
       for (const file of files) {
         try {
           const code = readFileSync(join(versionPath, file), 'utf-8');
-
           try {
             const newHashes = fingerprintCollector(code);
             hashes.push(...newHashes);
