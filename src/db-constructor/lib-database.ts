@@ -7,10 +7,6 @@ import fg from 'fast-glob';
 import fingerprintCollector from '../fingerprint-collector/index';
 import { POGHash, LibData, HashData } from '../types/types';
 
-const rootDir = process.cwd();
-const outputDir = join(rootDir, '../data');
-fs.mkdirSync(outputDir, { recursive: true });
-
 const parseVersionString = (version: string) => {
   const [major, minor, patch = '0'] = version.split('.');
   const [patchVersion, patchSuffix = '0'] = patch.split('-');

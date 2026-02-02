@@ -203,10 +203,14 @@ async function detectLibrary(urlOrpath, isWeb = false, save = false) {
             : 'Scanning for JavaScript files...',
         spinner: 'dots',
     }).start();
+    const startScanTime = process.hrtime.bigint();
     if (isWeb) {
         const { allFilePaths, domainFolder } = await (0, crawler_1.downloadScripts)(urlOrpath);
         filePaths = allFilePaths;
         mainFolder = domainFolder;
+        const endScanTime = process.hrtime.bigint();
+        const scanDuration = Number(endScanTime - startScanTime) / 1e9;
+        scanSpinner.succeed(`Crawled ${chalk_1.default.bold(filePaths.length)} JavaScript file(s) in ${chalk_1.default.bold(scanDuration.toFixed(2))}s`);
     }
     else {
         if (isFile) {
@@ -217,9 +221,10 @@ async function detectLibrary(urlOrpath, isWeb = false, save = false) {
                 cwd: urlOrpath,
                 absolute: true,
             });
+            scanSpinner.succeed(`Found ${chalk_1.default.bold(filePaths.length)} JavaScript file(s)`);
         }
     }
-    scanSpinner.succeed(`Found ${chalk_1.default.bold(filePaths.length)} JavaScript file(s)`);
+    const startTime = process.hrtime.bigint();
     const analyzeSpinner = (0, ora_1.default)({
         text: 'Analyzing files...',
         spinner: 'dots',
@@ -266,7 +271,9 @@ async function detectLibrary(urlOrpath, isWeb = false, save = false) {
             mergeUnique(existing.type3Versions, score.type3Versions);
         }
     }
-    analyzeSpinner.succeed('Analysis complete');
+    const endTime = process.hrtime.bigint();
+    const duration = Number(endTime - startTime) / 1e9;
+    analyzeSpinner.succeed(`Analyzed in ${chalk_1.default.bold(duration.toFixed(2))}s`);
     const scores = [...merged.values()];
     console.log();
     if (scores.length === 0) {

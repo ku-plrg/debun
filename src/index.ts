@@ -14,28 +14,10 @@ import { exec } from 'child_process';
 import util from 'util';
 import chalk from 'chalk';
 import ora from 'ora';
-import boxen, { type Options as BoxenOptions } from 'boxen';
+import boxen from 'boxen';
 const execAsync = util.promisify(exec);
 
 const VERSION = '1.0.2';
-
-const log = {
-  info: (msg: string) => console.log(chalk.blue('ℹ'), msg),
-  success: (msg: string) => console.log(chalk.green('✔'), msg),
-  warn: (msg: string) => console.log(chalk.yellow('⚠'), msg),
-  error: (msg: string) => console.log(chalk.red('✖'), msg),
-  title: (msg: string) => console.log(chalk.bold.cyan(`\n${msg}\n`)),
-  dim: (msg: string) => console.log(chalk.dim(msg)),
-  box: (msg: string, options?: BoxenOptions) =>
-    console.log(
-      boxen(msg, {
-        padding: 1,
-        borderColor: 'cyan',
-        borderStyle: 'round',
-        ...options,
-      })
-    ),
-};
 
 function printHelp() {
   const title = chalk.bold.cyan('debun');
@@ -127,7 +109,7 @@ export async function addPackages(packageNames: string[]) {
       duplicateCount++;
       console.log(
         boxen(
-          `Package ${chalk.bold(
+          `${chalk.yellow('⚠')} Package ${chalk.bold(
             packageName
           )} already exists in the database, skipping...`,
           {
@@ -236,7 +218,7 @@ export async function addPackages(packageNames: string[]) {
 
     console.log(
       boxen(
-        `Added ${chalk.bold(packageNames.length - duplicateCount)} package(s) to database`,
+        `${chalk.green('✔')} Added ${chalk.bold(packageNames.length - duplicateCount)} package(s) to database`,
         {
           padding: { top: 0, bottom: 0, left: 1, right: 1 },
           borderColor: 'green',
@@ -277,11 +259,16 @@ export async function detectLibrary(
       : 'Scanning for JavaScript files...',
     spinner: 'dots',
   }).start();
-
+  const startScanTime = process.hrtime.bigint();
   if (isWeb) {
     const { allFilePaths, domainFolder } = await downloadScripts(urlOrpath);
     filePaths = allFilePaths;
     mainFolder = domainFolder;
+    const endScanTime = process.hrtime.bigint();
+    const scanDuration = Number(endScanTime - startScanTime) / 1e9;
+    scanSpinner.succeed(
+      `Crawled ${chalk.bold(filePaths.length)} JavaScript file(s) in ${chalk.bold(scanDuration.toFixed(2))}s`
+    );
   } else {
     if (isFile) {
       filePaths = [path.resolve(urlOrpath)];
@@ -290,13 +277,13 @@ export async function detectLibrary(
         cwd: urlOrpath,
         absolute: true,
       });
+      scanSpinner.succeed(
+        `Found ${chalk.bold(filePaths.length)} JavaScript file(s)`
+      );
     }
   }
 
-  scanSpinner.succeed(
-    `Found ${chalk.bold(filePaths.length)} JavaScript file(s)`
-  );
-
+  const startTime = process.hrtime.bigint();
   const analyzeSpinner = ora({
     text: 'Analyzing files...',
     spinner: 'dots',
@@ -347,7 +334,9 @@ export async function detectLibrary(
     }
   }
 
-  analyzeSpinner.succeed('Analysis complete');
+  const endTime = process.hrtime.bigint();
+  const duration = Number(endTime - startTime) / 1e9;
+  analyzeSpinner.succeed(`Analyzed in ${chalk.bold(duration.toFixed(2))}s`);
 
   const scores = [...merged.values()];
 
@@ -386,7 +375,9 @@ export async function detectLibrary(
 
   if (isWeb) {
     if (save) {
-      log.success(`Downloaded scripts saved to ${chalk.underline(mainFolder)}`);
+      console.log(
+        `${chalk.green('✔')} Downloaded scripts saved to ${chalk.underline(mainFolder)}`
+      );
     } else {
       fs.rmSync(mainFolder, { recursive: true, force: true });
     }
@@ -506,7 +497,7 @@ async function main() {
 
       console.log(
         boxen(
-          `Saved to ${chalk.underline(outputPath)}\n\n📦 ${chalk.bold(libNames.length)} libraries in database`,
+          `${chalk.green('✔')} Saved to ${chalk.underline(outputPath)}\n\n📦 ${chalk.bold(libNames.length)} libraries in database`,
           {
             padding: { top: 0, bottom: 0, left: 1, right: 1 },
             borderColor: 'green',

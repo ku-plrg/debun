@@ -43,9 +43,6 @@ const sort_1 = __importDefault(require("semver/functions/sort"));
 const valid_1 = __importDefault(require("semver/functions/valid"));
 const fast_glob_1 = __importDefault(require("fast-glob"));
 const index_1 = __importDefault(require("../fingerprint-collector/index"));
-const rootDir = process.cwd();
-const outputDir = (0, path_1.join)(rootDir, '../data');
-fs_1.default.mkdirSync(outputDir, { recursive: true });
 const parseVersionString = (version) => {
     const [major, minor, patch = '0'] = version.split('.');
     const [patchVersion, patchSuffix = '0'] = patch.split('-');
