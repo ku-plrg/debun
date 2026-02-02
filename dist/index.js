@@ -226,14 +226,15 @@ async function detectLibrary(urlOrpath, isWeb = false, save = false) {
     for (let i = 0; i < filePaths.length; i++) {
         const filePath = filePaths[i];
         analyzeSpinner.text = `Analyzing files... ${chalk_1.default.dim(`(${i + 1}/${filePaths.length})`)}`;
-        let raw;
+        let fingerprints;
         try {
-            raw = fs_1.default.readFileSync(filePath, 'utf-8');
+            const raw = fs_1.default.readFileSync(filePath, 'utf-8');
+            fingerprints = (0, fingerprint_collector_1.default)(raw);
         }
         catch (e) {
+            console.log(chalk_1.default.yellow(`⚠ Warning: Failed to process file ${filePath}: ${e.message}`));
             continue;
         }
-        const fingerprints = (0, fingerprint_collector_1.default)(raw);
         const hashes = {};
         for (const fp of fingerprints) {
             if (!hashes[fp.nodes]) {

@@ -296,18 +296,21 @@ export async function detectLibrary(
     }
   };
   const merged = new Map<string, Score>();
-
   for (let i = 0; i < filePaths.length; i++) {
     const filePath = filePaths[i];
     analyzeSpinner.text = `Analyzing files... ${chalk.dim(`(${i + 1}/${filePaths.length})`)}`;
-
-    let raw;
+    let fingerprints;
     try {
-      raw = fs.readFileSync(filePath, 'utf-8');
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      fingerprints = fingerprintCollector(raw);
     } catch (e) {
+      console.log(
+        chalk.yellow(
+          `⚠ Warning: Failed to process file ${filePath}: ${(e as any).message}`
+        )
+      );
       continue;
     }
-    const fingerprints = fingerprintCollector(raw);
     const hashes: Record<number, string[]> = {};
     for (const fp of fingerprints) {
       if (!hashes[fp.nodes]) {
