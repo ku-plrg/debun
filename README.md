@@ -21,25 +21,47 @@ $ npm i -g debun-cli
 
 ## Usage
 
-- **Detect libraries from Javascript directory or file**
-```bash
-$ debun "<path>"
-```
+### Commands
 
-- Example:
+- **Detect libraries from local JavaScript files or a directory**
 ```bash
-$ debun src/test
+$ debun detect <path>
 ```
-
 
 - **Detect libraries from a web page**
 ```bash
-$ debun "<url>"
+$ debun detect -w <url>
 ```
 
-- Example:
+- **Add packages to the database**
 ```bash
-$ debun https://youtube.com
+$ debun add <package-name1> <package-name2> ...
+```
+
+- **Reset the database to the original state**
+```bash
+$ debun reset
+```
+
+- **List all libraries in the database**
+```bash
+$ debun list
+```
+
+### Options
+
+- `-w, --web` Treat input as a web URL
+- `--save` Save downloaded scripts to local files (only for `detect -w`)
+- `-v, --version` Show version
+- `-h, --help` Show help message
+
+### Examples
+
+```bash
+$ debun detect ./src/js
+$ debun detect -w https://example.com
+$ debun add lodash
+$ debun reset
 ```
 
 ## Related

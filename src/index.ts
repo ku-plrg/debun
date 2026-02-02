@@ -18,6 +18,7 @@ import boxen from 'boxen';
 const execAsync = util.promisify(exec);
 
 const VERSION = '1.0.2';
+const FIX = '\u200b'; // zero-width space
 
 function printHelp() {
   const title = chalk.bold.cyan('debun');
@@ -109,7 +110,7 @@ export async function addPackages(packageNames: string[]) {
       duplicateCount++;
       console.log(
         boxen(
-          `${chalk.yellow('⚠')} Package ${chalk.bold(
+          `${chalk.yellow('⚠')}${FIX} Package ${chalk.bold(
             packageName
           )} already exists in the database, skipping...`,
           {
@@ -218,7 +219,7 @@ export async function addPackages(packageNames: string[]) {
 
     console.log(
       boxen(
-        `${chalk.green('✔')} Added ${chalk.bold(packageNames.length - duplicateCount)} package(s) to database`,
+        `${chalk.green('✔')}${FIX} Added ${chalk.bold(packageNames.length - duplicateCount)} package(s) to database `,
         {
           padding: { top: 0, bottom: 0, left: 1, right: 1 },
           borderColor: 'green',
@@ -343,7 +344,7 @@ export async function detectLibrary(
   console.log();
   if (scores.length === 0) {
     console.log(
-      boxen(`${chalk.yellow('⚠')} No libraries detected`, {
+      boxen(`${chalk.yellow('⚠')}${FIX} No libraries detected`, {
         padding: { top: 0, bottom: 0, left: 1, right: 1 },
         borderColor: 'yellow',
         borderStyle: 'round',
@@ -376,7 +377,7 @@ export async function detectLibrary(
   if (isWeb) {
     if (save) {
       console.log(
-        `${chalk.green('✔')} Downloaded scripts saved to ${chalk.underline(mainFolder)}`
+        `${chalk.green('✔')}${FIX} Downloaded scripts saved to ${chalk.underline(mainFolder)}`
       );
     } else {
       fs.rmSync(mainFolder, { recursive: true, force: true });
@@ -431,7 +432,7 @@ async function main() {
       if (!target) {
         console.log(
           boxen(
-            `${chalk.red('✖')} Missing target path or URL\n\n${chalk.dim('Usage: debun detect <path> or debun detect -w <url>')}`,
+            `${chalk.red('✖')}${FIX} Missing target path or URL\n\n${chalk.dim('Usage: debun detect <path> or debun detect -w <url>')}`,
             {
               padding: { top: 0, bottom: 0, left: 1, right: 1 },
               borderColor: 'red',
@@ -449,7 +450,7 @@ async function main() {
       if (packageNames.length === 0) {
         console.log(
           boxen(
-            `${chalk.red('✖')} Missing package name(s)\n\n${chalk.dim('Usage: debun add <package-name1> <package-name2> ...')}`,
+            `${chalk.red('✖')}${FIX} Missing package name(s)\n\n${chalk.dim('Usage: debun add <package-name1> <package-name2> ...')}`,
             {
               padding: { top: 0, bottom: 0, left: 1, right: 1 },
               borderColor: 'red',
@@ -497,7 +498,7 @@ async function main() {
 
       console.log(
         boxen(
-          `${chalk.green('✔')} Saved to ${chalk.underline(outputPath)}\n\n📦 ${chalk.bold(libNames.length)} libraries in database`,
+          `${chalk.green('✔')}${FIX} Saved to ${chalk.underline(outputPath)}\n\n📦 ${chalk.bold(libNames.length)} libraries in database`,
           {
             padding: { top: 0, bottom: 0, left: 1, right: 1 },
             borderColor: 'green',
@@ -509,11 +510,14 @@ async function main() {
     }
     default: {
       console.log(
-        boxen(`${chalk.red('✖')} Unknown command: ${chalk.bold(command)}`, {
-          padding: { top: 0, bottom: 0, left: 1, right: 1 },
-          borderColor: 'red',
-          borderStyle: 'round',
-        })
+        boxen(
+          `${chalk.red('✖')}${FIX} Unknown command: ${chalk.bold(command)}`,
+          {
+            padding: { top: 0, bottom: 0, left: 1, right: 1 },
+            borderColor: 'red',
+            borderStyle: 'round',
+          }
+        )
       );
       printHelp();
       process.exit(1);

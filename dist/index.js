@@ -22,20 +22,7 @@ const ora_1 = __importDefault(require("ora"));
 const boxen_1 = __importDefault(require("boxen"));
 const execAsync = util_1.default.promisify(child_process_1.exec);
 const VERSION = '1.0.2';
-const log = {
-    info: (msg) => console.log(chalk_1.default.blue('ℹ'), msg),
-    success: (msg) => console.log(chalk_1.default.green('✔'), msg),
-    warn: (msg) => console.log(chalk_1.default.yellow('⚠'), msg),
-    error: (msg) => console.log(chalk_1.default.red('✖'), msg),
-    title: (msg) => console.log(chalk_1.default.bold.cyan(`\n${msg}\n`)),
-    dim: (msg) => console.log(chalk_1.default.dim(msg)),
-    box: (msg, options) => console.log((0, boxen_1.default)(msg, {
-        padding: 1,
-        borderColor: 'cyan',
-        borderStyle: 'round',
-        ...options,
-    })),
-};
+const FIX = '\u200b'; // zero-width space
 function printHelp() {
     const title = chalk_1.default.bold.cyan('debun');
     const description = chalk_1.default.dim('Detecting Bundled JavaScript Libraries using Property-Order Graphs');
@@ -108,7 +95,7 @@ async function addPackages(packageNames) {
     for (const packageName of packageNames) {
         if (Liblist.includes(packageName)) {
             duplicateCount++;
-            console.log((0, boxen_1.default)(`Package ${chalk_1.default.bold(packageName)} already exists in the database, skipping...`, {
+            console.log((0, boxen_1.default)(`${chalk_1.default.yellow('⚠')}${FIX} Package ${chalk_1.default.bold(packageName)} already exists in the database, skipping...`, {
                 padding: { top: 0, bottom: 0, left: 1, right: 1 },
                 borderColor: 'yellow',
                 borderStyle: 'round',
@@ -174,7 +161,7 @@ async function addPackages(packageNames) {
     }
     else {
         buildSpinner.succeed('Database updated successfully');
-        console.log((0, boxen_1.default)(`Added ${chalk_1.default.bold(packageNames.length - duplicateCount)} package(s) to database`, {
+        console.log((0, boxen_1.default)(`${chalk_1.default.green('✔')}${FIX} Added ${chalk_1.default.bold(packageNames.length - duplicateCount)} package(s) to database `, {
             padding: { top: 0, bottom: 0, left: 1, right: 1 },
             borderColor: 'green',
             borderStyle: 'round',
@@ -277,7 +264,7 @@ async function detectLibrary(urlOrpath, isWeb = false, save = false) {
     const scores = [...merged.values()];
     console.log();
     if (scores.length === 0) {
-        console.log((0, boxen_1.default)(`${chalk_1.default.yellow('⚠')} No libraries detected`, {
+        console.log((0, boxen_1.default)(`${chalk_1.default.yellow('⚠')}${FIX} No libraries detected`, {
             padding: { top: 0, bottom: 0, left: 1, right: 1 },
             borderColor: 'yellow',
             borderStyle: 'round',
@@ -302,7 +289,7 @@ async function detectLibrary(urlOrpath, isWeb = false, save = false) {
     }
     if (isWeb) {
         if (save) {
-            log.success(`Downloaded scripts saved to ${chalk_1.default.underline(mainFolder)}`);
+            console.log(`${chalk_1.default.green('✔')}${FIX} Downloaded scripts saved to ${chalk_1.default.underline(mainFolder)}`);
         }
         else {
             fs_1.default.rmSync(mainFolder, { recursive: true, force: true });
@@ -351,7 +338,7 @@ async function main() {
         case 'detect': {
             const target = args[1];
             if (!target) {
-                console.log((0, boxen_1.default)(`${chalk_1.default.red('✖')} Missing target path or URL\n\n${chalk_1.default.dim('Usage: debun detect <path> or debun detect -w <url>')}`, {
+                console.log((0, boxen_1.default)(`${chalk_1.default.red('✖')}${FIX} Missing target path or URL\n\n${chalk_1.default.dim('Usage: debun detect <path> or debun detect -w <url>')}`, {
                     padding: { top: 0, bottom: 0, left: 1, right: 1 },
                     borderColor: 'red',
                     borderStyle: 'round',
@@ -364,7 +351,7 @@ async function main() {
         case 'add': {
             const packageNames = args.slice(1);
             if (packageNames.length === 0) {
-                console.log((0, boxen_1.default)(`${chalk_1.default.red('✖')} Missing package name(s)\n\n${chalk_1.default.dim('Usage: debun add <package-name1> <package-name2> ...')}`, {
+                console.log((0, boxen_1.default)(`${chalk_1.default.red('✖')}${FIX} Missing package name(s)\n\n${chalk_1.default.dim('Usage: debun add <package-name1> <package-name2> ...')}`, {
                     padding: { top: 0, bottom: 0, left: 1, right: 1 },
                     borderColor: 'red',
                     borderStyle: 'round',
@@ -397,7 +384,7 @@ async function main() {
             const outputPath = path_1.default.join(dbDir, 'library-list.txt');
             fs_1.default.writeFileSync(outputPath, libNames.join('\n') + '\n');
             spinner.succeed('Library list generated');
-            console.log((0, boxen_1.default)(`Saved to ${chalk_1.default.underline(outputPath)}\n\n📦 ${chalk_1.default.bold(libNames.length)} libraries in database`, {
+            console.log((0, boxen_1.default)(`${chalk_1.default.green('✔')}${FIX} Saved to ${chalk_1.default.underline(outputPath)}\n\n📦 ${chalk_1.default.bold(libNames.length)} libraries in database`, {
                 padding: { top: 0, bottom: 0, left: 1, right: 1 },
                 borderColor: 'green',
                 borderStyle: 'round',
@@ -405,7 +392,7 @@ async function main() {
             break;
         }
         default: {
-            console.log((0, boxen_1.default)(`${chalk_1.default.red('✖')} Unknown command: ${chalk_1.default.bold(command)}`, {
+            console.log((0, boxen_1.default)(`${chalk_1.default.red('✖')}${FIX} Unknown command: ${chalk_1.default.bold(command)}`, {
                 padding: { top: 0, bottom: 0, left: 1, right: 1 },
                 borderColor: 'red',
                 borderStyle: 'round',
