@@ -262,14 +262,19 @@ export async function detectLibrary(
   }).start();
   const startScanTime = process.hrtime.bigint();
   if (isWeb) {
-    const { allFilePaths, domainFolder } = await downloadScripts(urlOrpath);
-    filePaths = allFilePaths;
-    mainFolder = domainFolder;
-    const endScanTime = process.hrtime.bigint();
-    const scanDuration = Number(endScanTime - startScanTime) / 1e9;
-    scanSpinner.succeed(
-      `Crawled ${chalk.bold(filePaths.length)} JavaScript file(s) in ${chalk.bold(scanDuration.toFixed(2))}s`
-    );
+    try {
+      const { allFilePaths, domainFolder } = await downloadScripts(urlOrpath);
+      filePaths = allFilePaths;
+      mainFolder = domainFolder;
+      const endScanTime = process.hrtime.bigint();
+      const scanDuration = Number(endScanTime - startScanTime) / 1e9;
+      scanSpinner.succeed(
+        `Crawled ${chalk.bold(filePaths.length)} JavaScript file(s) in ${chalk.bold(scanDuration.toFixed(2))}s`
+      );
+    } catch (err) {
+      scanSpinner.fail(`Failed to crawl ${chalk.cyan(urlOrpath)}`);
+      process.exit(1);
+    }
   } else {
     if (isFile) {
       filePaths = [path.resolve(urlOrpath)];
@@ -304,11 +309,6 @@ export async function detectLibrary(
       const raw = fs.readFileSync(filePath, 'utf-8');
       fingerprints = fingerprintCollector(raw);
     } catch (e) {
-      console.log(
-        chalk.yellow(
-          `⚠ Warning: Failed to process file ${filePath}: ${(e as any).message}`
-        )
-      );
       continue;
     }
     const hashes: Record<number, string[]> = {};

@@ -131,7 +131,9 @@ async function downloadScripts(
       waitUntil: 'networkidle2',
       timeout: 90000,
     });
-  } catch (err) {}
+  } catch (err) {
+    await browser.close();
+  }
 
   const preloadScripts = await getPreloadScripts(page);
   preloadScripts.forEach((scriptUrl) => jsFiles.add(scriptUrl));

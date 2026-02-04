@@ -192,12 +192,18 @@ async function detectLibrary(urlOrpath, isWeb = false, save = false) {
     }).start();
     const startScanTime = process.hrtime.bigint();
     if (isWeb) {
-        const { allFilePaths, domainFolder } = await (0, crawler_1.downloadScripts)(urlOrpath);
-        filePaths = allFilePaths;
-        mainFolder = domainFolder;
-        const endScanTime = process.hrtime.bigint();
-        const scanDuration = Number(endScanTime - startScanTime) / 1e9;
-        scanSpinner.succeed(`Crawled ${chalk_1.default.bold(filePaths.length)} JavaScript file(s) in ${chalk_1.default.bold(scanDuration.toFixed(2))}s`);
+        try {
+            const { allFilePaths, domainFolder } = await (0, crawler_1.downloadScripts)(urlOrpath);
+            filePaths = allFilePaths;
+            mainFolder = domainFolder;
+            const endScanTime = process.hrtime.bigint();
+            const scanDuration = Number(endScanTime - startScanTime) / 1e9;
+            scanSpinner.succeed(`Crawled ${chalk_1.default.bold(filePaths.length)} JavaScript file(s) in ${chalk_1.default.bold(scanDuration.toFixed(2))}s`);
+        }
+        catch (err) {
+            scanSpinner.fail(`Failed to crawl ${chalk_1.default.cyan(urlOrpath)}`);
+            process.exit(1);
+        }
     }
     else {
         if (isFile) {
@@ -232,7 +238,6 @@ async function detectLibrary(urlOrpath, isWeb = false, save = false) {
             fingerprints = (0, fingerprint_collector_1.default)(raw);
         }
         catch (e) {
-            console.log(chalk_1.default.yellow(`⚠ Warning: Failed to process file ${filePath}: ${e.message}`));
             continue;
         }
         const hashes = {};
