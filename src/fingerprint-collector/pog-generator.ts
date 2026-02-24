@@ -235,7 +235,8 @@ function endLoop(
 
 function merge(prevIds: PrevId[]): Env {
   const envs = prevIds.map(([, env]) => env);
-  return envs.reduce(join, {});
+  if (envs.length === 0) return {};
+  return envs.reduce(join);
 }
 function join(left: Env, right: Env): Env {
   const result: Env = {};
